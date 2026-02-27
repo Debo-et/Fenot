@@ -1290,15 +1290,19 @@ const handleCreateJobWizard = useCallback(() => {
     const csvString = XLSX.utils.sheet_to_csv(worksheet, { FS: ',' });
     console.log('✅ [Excel] CSV conversion complete, length:', csvString.length, 'characters');
 
-    // 6. Upload CSV to backend
+    // 6. Upload CSV to backend – use the original file name (without extension) as CSV filename
     const formData = new FormData();
-    const safeName = metadata.name.replace(/[^a-z0-9]/gi, '_');
-    const csvFileName = `${safeName}_${Date.now()}.csv`;
+    // Extract base name from the original Excel file (remove extension)
+    const originalFileName = metadata.file.name;
+    const baseName = originalFileName.replace(/\.[^/.]+$/, ""); // removes last dot extension
+    // Sanitize the base name to be filesystem-safe
+    const safeBaseName = baseName.replace(/[^a-z0-9]/gi, '_');
+    const csvFileName = `${safeBaseName}.csv`;
     const csvBlob = new Blob([csvString], { type: 'text/csv' });
     formData.append('file', csvBlob, csvFileName);
 
     console.log('📤 [Excel] Uploading CSV to /api/upload-csv...');
-    const uploadResponse = await fetch('http://localhost:3000/api/upload-csv',  {
+    const uploadResponse = await fetch('http://localhost:3000/api/upload-csv', {
       method: 'POST',
       body: formData,
     });
@@ -1328,7 +1332,7 @@ const handleCreateJobWizard = useCallback(() => {
       delimiter: ',',
       header: metadata.hasHeaders ? 'true' : 'false',
       format: 'csv',
-      original_file_type: 'excel',   // <-- tag for reverse‑engineering
+      original_file_type: 'excel',   // tag for reverse‑engineering
     };
 
     // 9. Create the foreign table using the existing 'fdw_delimited' server
@@ -1350,6 +1354,30 @@ const handleCreateJobWizard = useCallback(() => {
 
     // 10. Store the resulting PostgreSQL table name in metadata
     metadata.postgresTableName = result.tableName || metadata.name;
+
+    // --- NEW: Insert metadata record into data_source_metadata table ---
+    const insertResult = await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: 'excel',
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options: {
+        ...options,
+        original_file_type: 'excel',
+        sheet: metadata.selectedSheet,
+        hasHeaders: metadata.hasHeaders,
+        // include any other relevant metadata
+      }
+    });
+
+    if (!insertResult.success) {
+      // Log warning but don't fail the overall operation – the foreign table already exists.
+      console.warn('⚠️ [Excel] Metadata insertion failed (non‑fatal):', insertResult.error);
+      toast.warn(`Foreign table created, but metadata tracking failed: ${insertResult.error}`, { autoClose: 5000 });
+    } else {
+      console.log('✅ [Excel] Data source metadata recorded with ID:', insertResult.id);
+    }
+    // --- END NEW ---
 
     // 11. Dispatch event to add node to the repository (still under "Excel Files")
     window.dispatchEvent(new CustomEvent('metadata-created', {
@@ -1878,133 +1906,163 @@ const handleCreateJobWizard = useCallback(() => {
   // ============================================================================
   // ✅ FIXED: INITIAL SYNC FROM POSTGRESQL – now works with nested categories
   // ============================================================================
-  useEffect(() => {
-    if (!apiService || !isConnected || isSyncing) {
-      return;
-    }
+useEffect(() => {
+  if (!apiService || !isConnected || isSyncing) {
+    console.log('⏭️ Sync skipped:', { hasApiService: !!apiService, isConnected, isSyncing });
+    return;
+  }
 
-    const syncExistingForeignTables = async () => {
-      setIsSyncing(true);
-      console.log('🔄 Starting foreign table synchronization (nested categories)...');
+  const syncExistingForeignTables = async () => {
+    setIsSyncing(true);
+    console.log('🔄 Starting foreign table synchronization (with data_source_metadata lookup)...');
 
-      try {
-        const connectionId = await getActivePostgresConnectionId(apiService);
-        if (!connectionId) {
-          console.warn('⚠️ No active PostgreSQL connection, skipping foreign table sync');
-          return;
-        }
+    try {
+      const connectionId = await getActivePostgresConnectionId(apiService);
+      if (!connectionId) {
+        console.warn('⚠️ No active PostgreSQL connection found, sync aborted');
+        return;
+      }
+      console.log('🔌 Using connection ID:', connectionId);
 
-        const schema = 'public';
-        console.log(`🔍 Syncing foreign tables from schema "${schema}" using connection ${connectionId}...`);
+      const schema = 'public';
+      console.log(`🔍 Fetching foreign tables from schema "${schema}"...`);
 
-        const tables = await getForeignTablesInSchema(apiService, connectionId, schema);
-        if (!tables || tables.length === 0) {
-          console.log('📭 No existing foreign tables found, sync complete');
-          return;
-        }
+      const tables = await getForeignTablesInSchema(apiService, connectionId, schema);
+      console.log(`📋 Found ${tables.length} foreign tables:`, tables.map(t => t.tablename));
 
-        console.log(`📋 Found ${tables.length} foreign tables, fetching metadata...`);
+      if (tables.length === 0) {
+        console.log('📭 No foreign tables to sync');
+        return;
+      }
 
-        const metadataPromises = tables.map(async (table) => {
+      const metadataPromises = tables.map(async (table) => {
+        try {
+          const meta = await reverseForeignTableMetadata(apiService, connectionId, schema, table.tablename);
+          console.log(`🔍 Before override: ${table.tablename} fileType = ${meta.fileType}`);
+
+          // --- Look up original type from data_source_metadata (ignore connection_id) ---
           try {
-            const meta = await reverseForeignTableMetadata(
-              apiService,
-              connectionId,
-              schema,
-              table.tablename
-            );
-            return { ...meta, oid: table.oid };
-          } catch (err) {
-            console.error(`❌ Failed to reverse metadata for ${table.tablename}:`, err);
-            return null;
+            const sql = `SELECT type, file_path, options
+                         FROM data_source_metadata
+                         WHERE foreign_table_name = $1`; // No connection_id filter
+            const params = [meta.tableName];
+            console.log(`🔎 Executing metadata lookup for ${meta.tableName} with SQL:`, sql, 'params:', params);
+
+            const lookupResult = await apiService.executeQuery(connectionId, sql, { params });
+            console.log(`📦 Raw lookupResult for ${meta.tableName}:`, lookupResult);
+
+            if (lookupResult.success) {
+              let rows: any[] = [];
+              if (Array.isArray(lookupResult.rows)) {
+                rows = lookupResult.rows;
+                console.log(`📊 Extracted rows from lookupResult.rows (length ${rows.length})`);
+              } else if (lookupResult.result && Array.isArray(lookupResult.result)) {
+                rows = lookupResult.result;
+                console.log(`📊 Extracted rows from lookupResult.result (length ${rows.length})`);
+              } else if (lookupResult.result?.rows && Array.isArray(lookupResult.result.rows)) {
+                rows = lookupResult.result.rows;
+                console.log(`📊 Extracted rows from lookupResult.result.rows (length ${rows.length})`);
+              } else {
+                console.log(`❓ No array found in any expected location. Full structure:`, lookupResult);
+              }
+
+              if (rows.length > 0) {
+                const stored = rows[0];
+                console.log(`📦 Found stored metadata for ${meta.tableName}:`, stored);
+                console.log(`   stored.type = "${stored.type}"`);
+                meta.fileType = stored.type;
+                if (stored.file_path) meta.filePath = stored.file_path;
+                if (stored.options) meta.options = { ...meta.options, ...stored.options };
+                console.log(`✅ After override: ${meta.tableName} fileType set to "${meta.fileType}"`);
+              } else {
+                console.log(`ℹ️ No stored metadata rows found for ${meta.tableName} – using inferred type`);
+              }
+            } else {
+              console.warn(`⚠️ Metadata lookup failed for ${meta.tableName}: ${lookupResult.error}`);
+            }
+          } catch (lookupErr: any) {
+            if (lookupErr.message?.includes('relation "data_source_metadata" does not exist')) {
+              console.warn('⚠️ data_source_metadata table not found. Run ./standalone-pg-builder.sh --setup-tables');
+            } else {
+              console.warn(`⚠️ Unexpected error during metadata lookup for ${meta.tableName}:`, lookupErr.message);
+            }
           }
-        });
+          // --- End lookup ---
 
-        const metadataList = await Promise.all(metadataPromises);
-        const validMetadata = metadataList
-          .filter((m): m is NonNullable<typeof m> & { oid: number } => m !== null)
-          .sort((a, b) => a.oid - b.oid);
+          console.log(`✅ Final for ${table.tablename}: fileType = ${meta.fileType}`);
+          return { ...meta, oid: table.oid };
+        } catch (err) {
+          console.error(`❌ Failed to reverse metadata for ${table.tablename}:`, err);
+          return null;
+        }
+      });
 
-        if (validMetadata.length === 0) {
-          console.log('📭 No valid metadata could be retrieved');
+      const metadataList = await Promise.all(metadataPromises);
+      const validMetadata = metadataList.filter((m): m is NonNullable<typeof m> & { oid: number } => m !== null);
+
+      if (validMetadata.length === 0) {
+        console.log('📭 No valid metadata could be retrieved');
+        return;
+      }
+
+      const updates: Array<{ folderId: string; newNode: RepositoryNode }> = [];
+      const foldersToExpand = new Set<string>();
+
+      validMetadata.forEach((meta) => {
+        const folderId = determineFolderId(meta.fileType);
+        console.log(`🗂️ For table ${meta.tableName} with fileType "${meta.fileType}" → folderId = ${folderId}`);
+        if (!folderId) {
+          console.warn(`Unknown file type "${meta.fileType}" for table ${meta.tableName}, skipping`);
           return;
         }
 
-        // ========== COLLECT ALL CHANGES LOCALLY ==========
-        const updates: Array<{ folderId: string; newNode: RepositoryNode }> = [];
-        const foldersToExpand = new Set<string>();
+        foldersToExpand.add(folderId);
+        const newNode = createNodeFromMetadata(meta, folderId, connectionId);
+        updates.push({ folderId, newNode });
+        console.log(`✅ Prepared node for ${meta.tableName} -> folder ${folderId}`);
+      });
 
-        validMetadata.forEach((meta) => {
-          const folderId = determineFolderId(meta.fileType);
-          if (!folderId) {
-            console.warn(`Unknown file type "${meta.fileType}" for table ${meta.tableName}, skipping`);
+      setRepositoryData((prev) => {
+        let newTree = prev;
+        updates.forEach(({ folderId, newNode }) => {
+          const found = findNodeAndParent(newTree, folderId);
+          if (!found) {
+            console.warn(`⚠️ Category folder "${folderId}" not found in repository tree, skipping`);
             return;
           }
-
-          foldersToExpand.add(folderId);
-          const newNode = createNodeFromMetadata(meta, folderId, connectionId);
-          updates.push({ folderId, newNode });
-
-          console.log(`✅ Prepared foreign table node:`, {
-            tableName: meta.tableName,
-            folderId,
-            nodeId: newNode.id,
-            columnsCount: newNode.metadata?.columns?.length || 0
-          });
-        });
-
-        // ========== SINGLE ATOMIC UPDATE TO REPOSITORY DATA ==========
-        setRepositoryData((prev) => {
-          let newTree = prev;
-
-          updates.forEach(({ folderId, newNode }) => {
-            // Find the folder node (nested anywhere)
-            const found = findNodeAndParent(newTree, folderId);
-            if (!found) {
-              console.warn(`⚠️ Category "${folderId}" not found, skipping`);
-              return;
+          newTree = updateNodeInTree(newTree, folderId, (folder) => {
+            const existingNames = new Set(folder.children.map((c) => c.name));
+            if (existingNames.has(newNode.name)) {
+              console.log(`⏭️ Node with name "${newNode.name}" already exists in ${folderId}, skipping`);
+              return folder;
             }
-
-            newTree = updateNodeInTree(newTree, folderId, (folder) => {
-              const existingNames = new Set(folder.children.map((c) => c.name));
-              if (existingNames.has(newNode.name)) {
-                return folder; // duplicate, skip
-              }
-              return {
-                ...folder,
-                children: [...folder.children, newNode].sort((a, b) =>
-                  a.name.localeCompare(b.name)
-                ),
-                metadata: {
-                  ...folder.metadata,
-                  count: (folder.metadata?.count || 0) + 1
-                }
-              };
-            });
+            return {
+              ...folder,
+              children: [...folder.children, newNode].sort((a, b) => a.name.localeCompare(b.name)),
+              metadata: { ...folder.metadata, count: (folder.metadata?.count || 0) + 1 }
+            };
           });
-
-          return newTree;
         });
+        return newTree;
+      });
 
-        // ========== SINGLE UPDATE TO EXPANDED NODES ==========
-        setExpandedNodes((prev) => {
-          const next = new Set(prev);
-          foldersToExpand.forEach((id) => next.add(id));
-          console.log('🔽 Expanded nodes AFTER sync:', Array.from(next));
-          return next;
-        });
+      setExpandedNodes((prev) => {
+        const next = new Set(prev);
+        foldersToExpand.forEach((id) => next.add(id));
+        console.log('🔽 Expanded nodes after sync:', Array.from(next));
+        return next;
+      });
 
-        console.log('✅ Foreign table synchronization complete (atomic, nested)');
-      } catch (error) {
-        console.error('❌ Failed to synchronize foreign tables:', error);
-      } finally {
-        setIsSyncing(false);
-      }
-    };
+      console.log('✅ Foreign table synchronization complete');
+    } catch (error) {
+      console.error('❌ Sync failed with unexpected error:', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
-    syncExistingForeignTables();
-  }, [apiService, isConnected, setRepositoryData]);
-
+  syncExistingForeignTables();
+}, [apiService, isConnected, setRepositoryData]);
   // ==================== METADATA EXPANSION ON NEW NODES ====================
   useEffect(() => {
     if (metadataSettings.autoExpandNew) {

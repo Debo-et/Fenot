@@ -776,6 +776,42 @@ async executeQuery(
     }
   }
 
+  async insertDataSourceMetadata(
+  connectionId: string,
+  metadata: {
+    name: string;
+    type: string;
+    filePath: string;
+    foreignTableName: string;
+    options?: Record<string, any>;
+  }
+): Promise<{ success: boolean; error?: string; id?: string }> {
+  const sql = `
+    INSERT INTO data_source_metadata
+      (name, type, file_path, foreign_table_name, connection_id, options, created_at, updated_at)
+    VALUES
+      ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())
+    RETURNING id;
+  `;
+  const params = [
+    metadata.name,
+    metadata.type,
+    metadata.filePath,
+    metadata.foreignTableName,
+    connectionId,
+    JSON.stringify(metadata.options || {})
+  ];
+  try {
+    const result = await this.executeQuery(connectionId, sql, { params });
+    if (result.success && result.result?.rows?.length > 0) {
+      return { success: true, id: result.result.rows[0].id };
+    }
+    return { success: false, error: result.error || 'No ID returned' };
+  } catch (error: any) {
+    console.error('❌ Failed to insert data source metadata:', error);
+    return { success: false, error: error.message };
+  }
+}
   // ===========================================================================
   // Diagnostic Methods
   // ===========================================================================
@@ -1385,6 +1421,8 @@ export function useDatabaseOperations(options?: UseDatabaseOperationsOptions) {
     }
   }, [apiService]);
 
+  
+
   // ===========================================================================
   // CONNECTION OPERATIONS
   // ===========================================================================
@@ -1661,6 +1699,7 @@ export function useDatabaseOperations(options?: UseDatabaseOperationsOptions) {
     apiService,
   };
 }
+
 
 // ===========================================================================
 // Export Default Instance
