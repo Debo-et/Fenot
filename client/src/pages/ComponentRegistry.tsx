@@ -1,12 +1,13 @@
 // src/components/canvas/ComponentRegistry.tsx
 import React from 'react';
-import { 
-  Database, 
-  FileText, 
-  FileSpreadsheet, 
-  FileCode, 
-  FileJson, 
-  Regex, 
+import {
+  // Input / Output
+  Database,
+  FileText,
+  FileSpreadsheet,
+  FileCode,
+  FileJson,
+  Regex,
   Webhook,
   Settings,
   Filter,
@@ -30,7 +31,7 @@ import {
   MessageCircle,
   HardDrive,
   Code,
-  // New icons for analytics & visualization
+  // Analytics & Visualization (already present)
   BarChart,
   LineChart,
   PieChart,
@@ -40,7 +41,20 @@ import {
   Drill,
   Activity,
   TrendingUp,
-  Target
+  Target,
+  // Additional icons needed for missing components
+  Gauge,
+  Funnel,
+  Trello,          // treemap
+  Waves,           // waterfall, moving-average
+  AreaChart,
+  Circle,          // bubble-chart
+  Grid,            // scatter-matrix
+  GitBranch,       // reference-line
+  Sigma,           // percentile, running-total
+  FunctionSquare,  // statistical-summary
+  CircleDot,       // cluster
+  Kanban,          // word-cloud
 } from 'lucide-react';
 
 export type ComponentCategory = 'input' | 'transform' | 'output' | 'analytics' | 'visualization';
@@ -158,7 +172,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDefinition> = {
     description: 'Read files with complex schemas',
     source: 'sidebar'
   },
-  
+
   // ==================== TRANSFORM COMPONENTS ====================
   'tMap': {
     id: 'tMap',
@@ -390,7 +404,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDefinition> = {
     description: 'Cache data for performance',
     source: 'rightPanel'
   },
-  
+
   // ==================== OUTPUT COMPONENTS ====================
   'delimited-output': {
     id: 'delimited-output',
@@ -594,6 +608,97 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDefinition> = {
     description: 'Identify statistical outliers',
     source: 'rightPanel'
   },
+  // ----- Missing advanced analytics components -----
+  'forecast': {
+    id: 'forecast',
+    displayName: 'Forecast',
+    icon: <TrendingUp className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'ANALYTICS',
+    description: 'Time series forecasting with confidence intervals',
+    source: 'rightPanel'
+  },
+  'cluster': {
+    id: 'cluster',
+    displayName: 'Cluster',
+    icon: <CircleDot className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'ANALYTICS',
+    description: 'K‑means or hierarchical clustering',
+    source: 'rightPanel'
+  },
+  'reference-line': {
+    id: 'reference-line',
+    displayName: 'Reference Line',
+    icon: <GitBranch className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Add constant, average, or percentile lines',
+    source: 'rightPanel'
+  },
+  'trend-line': {
+    id: 'trend-line',
+    displayName: 'Trend Line',
+    icon: <LineChart className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Linear, logarithmic, or exponential trend',
+    source: 'rightPanel'
+  },
+  'moving-average': {
+    id: 'moving-average',
+    displayName: 'Moving Average',
+    icon: <Waves className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Smooth fluctuations over a sliding window',
+    source: 'rightPanel'
+  },
+  'percentile': {
+    id: 'percentile',
+    displayName: 'Percentile',
+    icon: <Sigma className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Compute percentiles for a measure',
+    source: 'rightPanel'
+  },
+  'rank': {
+    id: 'rank',
+    displayName: 'Rank',
+    icon: <Hash className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Rank dimension members by a measure',
+    source: 'rightPanel'
+  },
+  'running-total': {
+    id: 'running-total',
+    displayName: 'Running Total',
+    icon: <Sigma className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'ANALYTICS',
+    description: 'Cumulative sum over a partition',
+    source: 'rightPanel'
+  },
+  'statistical-summary': {
+    id: 'statistical-summary',
+    displayName: 'Statistical Summary',
+    icon: <FunctionSquare className="w-5 h-5" />,
+    category: 'analytics',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'ANALYTICS',
+    description: 'Detailed stats: skew, kurtosis, quartiles',
+    source: 'rightPanel'
+  },
 
   // ==================== VISUALIZATION COMPONENTS ====================
   'bar-chart': {
@@ -675,10 +780,121 @@ export const COMPONENT_REGISTRY: Record<string, ComponentDefinition> = {
     defaultRole: 'VISUALIZATION',
     description: 'Single metric with optional comparison',
     source: 'rightPanel'
+  },
+  // ----- Missing advanced visualization components -----
+  'map': {
+    id: 'map',
+    displayName: 'Map',
+    icon: <Map className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Geographic data with markers or choropleth',
+    source: 'rightPanel'
+  },
+  'gauge': {
+    id: 'gauge',
+    displayName: 'Gauge',
+    icon: <Gauge className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 30, height: 20 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Single value against a target range',
+    source: 'rightPanel'
+  },
+  'funnel': {
+    id: 'funnel',
+    displayName: 'Funnel',
+    icon: <Funnel className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 30, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Conversion stages and drop‑off',
+    source: 'rightPanel'
+  },
+  'treemap': {
+    id: 'treemap',
+    displayName: 'Treemap',
+    icon: <Trello className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Hierarchical proportions as nested rectangles',
+    source: 'rightPanel'
+  },
+  'waterfall': {
+    id: 'waterfall',
+    displayName: 'Waterfall',
+    icon: <Waves className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Cumulative effect of sequential values',
+    source: 'rightPanel'
+  },
+  'area-chart': {
+    id: 'area-chart',
+    displayName: 'Area Chart',
+    icon: <AreaChart className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Filled line chart showing magnitude over time',
+    source: 'rightPanel'
+  },
+  'bubble-chart': {
+    id: 'bubble-chart',
+    displayName: 'Bubble Chart',
+    icon: <Circle className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Three dimensions: x, y, and bubble size',
+    source: 'rightPanel'
+  },
+  'scatter-matrix': {
+    id: 'scatter-matrix',
+    displayName: 'Scatter Matrix',
+    icon: <Grid className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 40, height: 30 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Matrix of scatter plots for multiple variables',
+    source: 'rightPanel'
+  },
+  'dual-axis': {
+    id: 'dual-axis',
+    displayName: 'Dual‑Axis Chart',
+    icon: <Layers className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Combine bar and line with independent axes',
+    source: 'rightPanel'
+  },
+  'pareto': {
+    id: 'pareto',
+    displayName: 'Pareto Chart',
+    icon: <BarChart className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Bar chart with cumulative percentage line',
+    source: 'rightPanel'
+  },
+  'word-cloud': {
+    id: 'word-cloud',
+    displayName: 'Word Cloud',
+    icon: <Kanban className="w-5 h-5" />,
+    category: 'visualization',
+    defaultDimensions: { width: 35, height: 25 },
+    defaultRole: 'VISUALIZATION',
+    description: 'Frequency‑weighted text visualization',
+    source: 'rightPanel'
   }
 };
 
-// Helper functions
+// ==================== HELPER FUNCTIONS ====================
 export function getComponentDefinition(componentId: string): ComponentDefinition | null {
   return COMPONENT_REGISTRY[componentId] || null;
 }

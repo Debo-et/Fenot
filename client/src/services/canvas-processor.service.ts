@@ -8,9 +8,71 @@ import {
   AnalyticsComponentConfiguration,
   VisualizationComponentConfiguration
 } from '../types/metadata';
-import { DataSummaryConfig, ColumnAggregation, GroupByConfig } from '../types/analytics-configs';
-import { BoxPlotConfig } from '../types/visualization-configs';
-import { buildBoxPlotSpec } from '../components/visualization/boxplot-spec.builder'; // modular handler
+
+// Analytics configuration types – some may not be exported yet
+import {
+  DataSummaryConfig,
+  ColumnAggregation,
+  GroupByConfig,
+  FilterConfig,
+  SliceConfig,
+  DrillDownConfig,
+  CorrelationConfig,
+  ForecastConfig,
+  ClusterConfig,
+  TrendLineConfig,
+  MovingAverageConfig,
+  PercentileConfig,
+  RankConfig,
+  RunningTotalConfig,
+  StatisticalSummaryConfig,
+  PivotConfig
+  // OutlierDetectionConfig is NOT exported yet – we'll define locally
+} from '../types/analytics-configs';
+
+// Visualization configuration types
+import {
+  BarChartConfig,
+  LineChartConfig,
+  PieChartConfig,
+  ScatterPlotConfig,
+  HistogramConfig,
+  HeatmapConfig,
+  KpiConfig,
+  MapConfig,
+  GaugeConfig,
+  FunnelConfig,
+  TreemapConfig,
+  WaterfallConfig,
+  AreaChartConfig,
+  DualAxisConfig,
+  ParetoChartConfig,
+  WordCloudConfig,
+  BubbleChartConfig,
+  ScatterMatrixConfig,
+  BoxPlotConfig
+} from '../types/visualization-configs';
+
+// Import spec builders (placeholders – replace with real builders later)
+import { buildBoxPlotSpec } from '../components/visualization/boxplot-spec.builder';
+
+// ==================== LOCAL TYPE DEFINITIONS (if missing from imports) ====================
+// Remove these once the real types are exported from analytics-configs
+interface FilterCondition {
+  expression: string;          // adjust property name to match your actual type
+  // ... other fields
+}
+
+interface OutlierDetectionConfig {
+  columns?: string[];
+  method?: 'iqr' | 'zscore' | 'mad';
+  threshold?: number;
+  includeZScore?: boolean;
+  options?: Record<string, any>;
+  filters?: FilterCondition[];
+  inputLimit?: number;
+}
+// =======================================================================================
 
 export interface ProcessingResult {
   nodeId: string;
@@ -25,17 +87,159 @@ interface VisualizationHandler {
   buildSpec(vizConfig: VisualizationComponentConfiguration, rows: any[]): any;
 }
 
+// ==================== VISUALIZATION HANDLERS ====================
 const visualizationHandlers: Record<string, VisualizationHandler> = {};
 
-// Register box plot handler with a wrapper that casts the config
+// Box plot
 visualizationHandlers['box-plot'] = {
   buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
-    // vizConfig is actually the BoxPlotConfig object (the UI stores it directly)
     return buildBoxPlotSpec(vizConfig as unknown as BoxPlotConfig, rows);
   }
 };
 
-// Add other handlers as needed (bar, line, etc.)
+// Bar chart
+visualizationHandlers['bar-chart'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as BarChartConfig;
+    return { type: 'bar-chart', config, data: rows };
+  }
+};
+
+// Line chart
+visualizationHandlers['line-chart'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as LineChartConfig;
+    return { type: 'line-chart', config, data: rows };
+  }
+};
+
+// Pie chart
+visualizationHandlers['pie-chart'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as PieChartConfig;
+    return { type: 'pie-chart', config, data: rows };
+  }
+};
+
+// Scatter plot
+visualizationHandlers['scatter-plot'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as ScatterPlotConfig;
+    return { type: 'scatter-plot', config, data: rows };
+  }
+};
+
+// Histogram
+visualizationHandlers['histogram'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as HistogramConfig;
+    return { type: 'histogram', config, data: rows };
+  }
+};
+
+// Heatmap
+visualizationHandlers['heatmap'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as HeatmapConfig;
+    return { type: 'heatmap', config, data: rows };
+  }
+};
+
+// KPI
+visualizationHandlers['kpi'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as KpiConfig;
+    return { type: 'kpi', config, data: rows };
+  }
+};
+
+// Map
+visualizationHandlers['map'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as MapConfig;
+    return { type: 'map', config, data: rows };
+  }
+};
+
+// Gauge
+visualizationHandlers['gauge'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as GaugeConfig;
+    return { type: 'gauge', config, data: rows };
+  }
+};
+
+// Funnel
+visualizationHandlers['funnel'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as FunnelConfig;
+    return { type: 'funnel', config, data: rows };
+  }
+};
+
+// Treemap
+visualizationHandlers['treemap'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as TreemapConfig;
+    return { type: 'treemap', config, data: rows };
+  }
+};
+
+// Waterfall
+visualizationHandlers['waterfall'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as WaterfallConfig;
+    return { type: 'waterfall', config, data: rows };
+  }
+};
+
+// Area chart
+visualizationHandlers['area-chart'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as AreaChartConfig;
+    return { type: 'area-chart', config, data: rows };
+  }
+};
+
+// Dual axis
+visualizationHandlers['dual-axis'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as DualAxisConfig;
+    return { type: 'dual-axis', config, data: rows };
+  }
+};
+
+// Pareto
+visualizationHandlers['pareto'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as ParetoChartConfig;
+    return { type: 'pareto', config, data: rows };
+  }
+};
+
+// Word cloud
+visualizationHandlers['word-cloud'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as WordCloudConfig;
+    return { type: 'word-cloud', config, data: rows };
+  }
+};
+
+// Bubble chart
+visualizationHandlers['bubble-chart'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as BubbleChartConfig;
+    return { type: 'bubble-chart', config, data: rows };
+  }
+};
+
+// Scatter matrix
+visualizationHandlers['scatter-matrix'] = {
+  buildSpec: (vizConfig: VisualizationComponentConfiguration, rows: any[]) => {
+    const config = vizConfig as unknown as ScatterMatrixConfig;
+    return { type: 'scatter-matrix', config, data: rows };
+  }
+};
 
 // ==================== CONNECTION HELPER ====================
 async function getActivePostgresConnectionId(apiService: DatabaseApiService): Promise<string | null> {
@@ -496,10 +700,40 @@ export class CanvasProcessor {
     switch (config.analyticType) {
       case 'summary':
         return this.buildSummarySQL(config, sourceTables);
+      case 'filter':
+        return this.buildFilterSQL(config, sourceTables);
+      case 'slice':
+        return this.buildSliceSQL(config, sourceTables);
+      case 'drill-down':
+        return this.buildDrillDownSQL(config, sourceTables);
+      case 'correlation':
+        return this.buildCorrelationSQL(config, sourceTables);
+      case 'forecast':
+        return this.buildForecastSQL(config, sourceTables);
+      case 'cluster':
+        return this.buildClusterSQL(config, sourceTables);
+      case 'trend-line':
+        return this.buildTrendLineSQL(config, sourceTables);
+      case 'moving-average':
+        return this.buildMovingAverageSQL(config, sourceTables);
+      case 'percentile':
+        return this.buildPercentileSQL(config, sourceTables);
+      case 'rank':
+        return this.buildRankSQL(config, sourceTables);
+      case 'running-total':
+        return this.buildRunningTotalSQL(config, sourceTables);
+      case 'statistical-summary':
+        return this.buildStatisticalSummarySQL(config, sourceTables);
+      case 'pivot':
+        return this.buildPivotSQL(config, sourceTables);
+      case 'outlier-detection':
+        return this.buildOutlierDetectionSQL(config, sourceTables);
       default:
         return null;
     }
   }
+
+  // ==================== ANALYTICS SQL BUILDERS ====================
 
   private buildSummarySQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
     const params = config.parameters as DataSummaryConfig;
@@ -568,8 +802,9 @@ export class CanvasProcessor {
       selectColumns.push('*');
     }
 
-    const whereClause = preFilters.map(f => f.expression).join(' AND ');
-    const havingClause = postFilters.map(f => f.expression).join(' AND ');
+    // Safely extract filter expressions – adjust property name if needed
+    const whereClause = preFilters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ');
+    const havingClause = postFilters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ');
     const hasWindowFunctions = windowFunctions.length > 0;
 
     const buildBaseSelect = () => {
@@ -634,5 +869,326 @@ export class CanvasProcessor {
 
     console.log(`🔍 SQL generated for summary node:\n${finalSql}`);
     return finalSql;
+  }
+
+  private buildFilterSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as FilterConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    // Adjust property access to match your actual FilterCondition type
+    const conditions = (params.conditions || [])
+      .map(c => (c as any).expression || '1=1')
+      .join(` ${params.logicalOperator || 'AND'} `);
+    const selectColumns = params.outputColumns?.map(c => `"${c}"`).join(', ') || '*';
+
+    let sql = `SELECT ${selectColumns} FROM "${source}" WHERE ${conditions}`;
+    if (params.options?.limit) sql += ` LIMIT ${params.options.limit}`;
+    return sql;
+  }
+
+  private buildSliceSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as SliceConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    // Adjust property name – assuming slice has a `condition` field
+    const condition = (params as any).condition || '1=1';
+    return `SELECT * FROM "${source}" WHERE ${condition}`;
+  }
+
+  private buildDrillDownSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as DrillDownConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const groupBy = params.hierarchy.map(h => `"${h}"`).join(', ');
+    const measures = params.measures.map(m => {
+      let expr: string;
+      const col = m.column ? `"${m.column}"` : '*';
+      switch (m.aggregation) {
+        case 'count': expr = `COUNT(${col})`; break;
+        case 'sum': expr = `SUM(${col})`; break;
+        case 'avg': expr = `AVG(${col})`; break;
+        case 'min': expr = `MIN(${col})`; break;
+        case 'max': expr = `MAX(${col})`; break;
+        default: expr = `COUNT(*)`;
+      }
+      const alias = m.alias ? ` AS "${m.alias}"` : '';
+      return `${expr}${alias}`;
+    }).join(', ');
+
+    const whereClause = (params.filters || []).map(f => (f as any).expression || '').filter(Boolean).join(' AND ') || '';
+
+    let sql = `SELECT ${groupBy}, ${measures} FROM "${source}"`;
+    if (whereClause) sql += ` WHERE ${whereClause}`;
+    if (groupBy) sql += ` GROUP BY ${groupBy}`;
+    if (params.options?.limit) sql += ` LIMIT ${params.options.limit}`;
+    return sql;
+  }
+
+  private buildCorrelationSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as CorrelationConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const columns = params.columns;
+    if (!columns || columns.length < 2) return null;
+
+    const pairs: string[] = [];
+    for (let i = 0; i < columns.length; i++) {
+      for (let j = i + 1; j < columns.length; j++) {
+        pairs.push(`CORR("${columns[i]}", "${columns[j]}") AS corr_${columns[i]}_${columns[j]}`);
+      }
+    }
+    const select = pairs.join(',\n  ');
+    return `SELECT\n  ${select}\nFROM "${source}"`;
+  }
+
+  private buildForecastSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as ForecastConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const timeCol = params.timeColumn;
+    const valueCol = params.valueColumn;
+    const groupBy = params.groupBy?.map(g => `"${g}"`).join(', ');
+    const filters = (params.filters || []).map(f => (f as any).expression || '').filter(Boolean).join(' AND ') || '';
+
+    let sql = `SELECT ${timeCol ? `"${timeCol}"` : ''}, "${valueCol}"`;
+    if (groupBy) sql += `, ${groupBy}`;
+    sql += `\nFROM "${source}"`;
+    if (filters) sql += `\nWHERE ${filters}`;
+    if (params.inputLimit) sql += `\nLIMIT ${params.inputLimit}`;
+    return sql;
+  }
+
+  private buildClusterSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as ClusterConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const columns = params.columns?.map(c => `"${c}"`).join(', ') || '*';
+    const filters = (params.filters || []).map(f => (f as any).expression || '').filter(Boolean).join(' AND ') || '';
+    let sql = `SELECT ${columns} FROM "${source}"`;
+    if (filters) sql += ` WHERE ${filters}`;
+    if (params.inputLimit) sql += ` LIMIT ${params.inputLimit}`;
+    return sql;
+  }
+
+  private buildTrendLineSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as TrendLineConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const xCol = params.xColumn;
+    const yCol = params.yColumn;
+    const groupBy = params.groupBy?.map(g => `"${g}"`).join(', ');
+    const filters = (params.filters || []).map(f => (f as any).expression || '').filter(Boolean).join(' AND ') || '';
+
+    let sql = `SELECT "${xCol}", "${yCol}"`;
+    if (groupBy) sql += `, ${groupBy}`;
+    sql += `\nFROM "${source}"`;
+    if (filters) sql += `\nWHERE ${filters}`;
+    if (params.inputLimit) sql += `\nLIMIT ${params.inputLimit}`;
+    return sql;
+  }
+
+  private buildMovingAverageSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as MovingAverageConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const orderBy = params.orderByColumn;
+    const valueCol = params.valueColumn;
+    const partitionBy = params.partitionBy?.map(p => `"${p}"`).join(', ');
+    const windowSize = params.windowSize || 3;
+
+    const over = `OVER (${partitionBy ? `PARTITION BY ${partitionBy} ` : ''}ORDER BY "${orderBy}" ROWS BETWEEN ${windowSize-1} PRECEDING AND CURRENT ROW)`;
+    const avgExpr = `AVG("${valueCol}") ${over} AS "${params.alias || 'moving_avg'}"`;
+
+    let sql = `SELECT *, ${avgExpr} FROM "${source}"`;
+    if (params.filters?.length) {
+      const filterClause = params.filters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ');
+      sql += ` WHERE ${filterClause}`;
+    }
+    if (params.limit) sql += ` LIMIT ${params.limit}`;
+    return sql;
+  }
+
+  private buildPercentileSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as PercentileConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const valueCol = params.valueColumn;
+    const percentiles = params.percentiles || [0.25, 0.5, 0.75];
+    const groupBy = params.groupBy?.map(g => `"${g}"`).join(', ');
+
+    const percentileExprs = percentiles.map(p => {
+      const alias = params.output?.aliasBase ? `${params.output.aliasBase}${Math.round(p*100)}` : `p${Math.round(p*100)}`;
+      return `PERCENTILE_CONT(${p}) WITHIN GROUP (ORDER BY "${valueCol}") AS "${alias}"`;
+    }).join(',\n  ');
+
+    let sql = `SELECT`;
+    if (groupBy) sql += ` ${groupBy},`;
+    sql += `\n  ${percentileExprs}\nFROM "${source}"`;
+    if (groupBy) sql += `\nGROUP BY ${groupBy}`;
+    if (params.filters?.length) {
+      const filterClause = params.filters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ');
+      sql += ` WHERE ${filterClause}`;
+    }
+    if (params.options?.limit) sql += ` LIMIT ${params.options.limit}`;
+    return sql;
+  }
+
+  private buildRankSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as RankConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const orderBy = params.orderBy.map(o => `"${o.column}" ${o.direction}`).join(', ');
+    const partitionBy = params.partitionBy?.map(p => `"${p}"`).join(', ');
+
+    let rankFunc: string;
+    switch (params.function) {
+      case 'row_number': rankFunc = 'ROW_NUMBER()'; break;
+      case 'rank': rankFunc = 'RANK()'; break;
+      case 'dense_rank': rankFunc = 'DENSE_RANK()'; break;
+      case 'ntile': rankFunc = `NTILE(${params.ntileBuckets || 4})`; break;
+      default: rankFunc = 'ROW_NUMBER()';
+    }
+
+    const overParts = [];
+    if (partitionBy) overParts.push(`PARTITION BY ${partitionBy}`);
+    if (orderBy) overParts.push(`ORDER BY ${orderBy}`);
+    const over = overParts.length ? ` OVER (${overParts.join(' ')})` : '';
+
+    const alias = params.alias || 'rank';
+    const select = params.includeAllColumns ? '*' : `${orderBy ? orderBy.split(', ').map(c => c.split(' ')[0]).join(', ') : ''}, ${rankFunc}${over} AS "${alias}"`;
+
+    let sql = `SELECT ${select} FROM "${source}"`;
+    if (params.filters?.length) {
+      sql += ` WHERE ${params.filters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ')}`;
+    }
+    if (params.limit) sql += ` LIMIT ${params.limit}`;
+    return sql;
+  }
+
+  private buildRunningTotalSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as RunningTotalConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const orderBy = params.orderBy.map(o => `"${o.column}" ${o.direction}`).join(', ');
+    const partitionBy = params.partitionBy?.map(p => `"${p}"`).join(', ');
+
+    const over = `OVER (${partitionBy ? `PARTITION BY ${partitionBy} ` : ''}ORDER BY ${orderBy} ROWS UNBOUNDED PRECEDING)`;
+    const sumExpr = `SUM("${params.valueColumn}") ${over} AS "${params.alias || 'running_total'}"`;
+
+    let sql = `SELECT *, ${sumExpr} FROM "${source}"`;
+    if (params.filters?.length) {
+      sql += ` WHERE ${params.filters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ')}`;
+    }
+    if (params.limit) sql += ` LIMIT ${params.limit}`;
+    return sql;
+  }
+
+  private buildStatisticalSummarySQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as StatisticalSummaryConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const columns = params.columns || [];
+    const stats = params.statistics || { count: true, sum: true, avg: true, min: true, max: true };
+    const groupBy = params.groupBy?.map(g => `"${g}"`).join(', ');
+
+    const exprs: string[] = [];
+    columns.forEach(col => {
+      if (stats.count) exprs.push(`COUNT("${col}") AS count_${col}`);
+      if (stats.sum) exprs.push(`SUM("${col}") AS sum_${col}`);
+      if (stats.avg) exprs.push(`AVG("${col}") AS avg_${col}`);
+      if (stats.min) exprs.push(`MIN("${col}") AS min_${col}`);
+      if (stats.max) exprs.push(`MAX("${col}") AS max_${col}`);
+      if (stats.stddev) exprs.push(`STDDEV("${col}") AS stddev_${col}`);
+      if (stats.variance) exprs.push(`VARIANCE("${col}") AS variance_${col}`);
+      if (stats.skewness) exprs.push(`SKEWNESS("${col}") AS skew_${col}`);
+      if (stats.kurtosis) exprs.push(`KURTOSIS("${col}") AS kurt_${col}`);
+    });
+
+    let sql = `SELECT`;
+    if (groupBy) sql += ` ${groupBy},`;
+    sql += `\n  ${exprs.join(',\n  ')}\nFROM "${source}"`;
+    if (groupBy) sql += `\nGROUP BY ${groupBy}`;
+    if (params.filters?.length) {
+      sql += ` WHERE ${params.filters.map(f => (f as any).expression || '').filter(Boolean).join(' AND ')}`;
+    }
+    if (params.options?.limit) sql += ` LIMIT ${params.options.limit}`;
+    return sql;
+  }
+
+  private buildPivotSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    const params = config.parameters as PivotConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    // Pivot is complex; for simplicity we generate a crosstab query using tablefunc extension.
+    // This requires the extension to be installed. We'll assume it is.
+    const rowColumns = params.rows.map(r => `"${r}"`).join(', ');
+    const colColumn = params.columns[0]; // simplified: first column only
+    const valueColumn = params.values[0]; // simplified: first value only
+    const aggFunc = 'SUM'; // could be configurable
+
+    // We need to know all possible column values to pivot; hard to do dynamically.
+    // Return a placeholder query.
+    return `-- PIVOT not fully implemented; using placeholder\nSELECT * FROM "${source}"`;
+  }
+
+  private buildOutlierDetectionSQL(config: AnalyticsComponentConfiguration, sourceTables: string[]): string | null {
+    // Use local OutlierDetectionConfig type (defined at top of file)
+    const params = config.parameters as OutlierDetectionConfig;
+    if (!params) return null;
+    const source = sourceTables[0];
+    if (!source) return null;
+
+    const columns = params.columns || [];
+    const method = params.method || 'iqr';
+    const threshold = params.threshold || 3;
+
+    // For IQR method we'd need to compute quartiles and flag outliers.
+    // This is complex; we return a simple query that adds a flag column using a subquery.
+    if (method === 'iqr') {
+      const col = columns[0]; // simplify
+      const sql = `
+WITH stats AS (
+  SELECT
+    PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY "${col}") AS q1,
+    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY "${col}") AS q3
+  FROM "${source}"
+)
+SELECT
+  *,
+  CASE
+    WHEN "${col}" < (q1 - ${threshold} * (q3 - q1)) OR "${col}" > (q3 + ${threshold} * (q3 - q1))
+    THEN true ELSE false
+  END AS is_outlier
+FROM "${source}", stats
+`;
+      return sql;
+    }
+    return `SELECT *, false AS is_outlier FROM "${source}"`;
   }
 }

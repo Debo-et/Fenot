@@ -44,8 +44,8 @@ import {
 } from '../types/metadata';
 
 // Import configuration types (new)
-import { DataSummaryConfig } from '../types/analytics-configs';
-import { BoxPlotConfig } from '../types/visualization-configs';
+import { ClusterConfig, CorrelationConfig, DataSummaryConfig, DrillDownConfig, FilterConfig, ForecastConfig, MovingAverageConfig, PercentileConfig, PivotConfig, ReferenceLineConfig, RunningTotalConfig, SliceConfig, TrendLineConfig } from '../types/analytics-configs';
+import { BarChartConfig, BoxPlotConfig, FunnelConfig, HeatmapConfig, HistogramConfig, KpiConfig, LineChartConfig, ParetoChartConfig, ScatterPlotConfig, WaterfallConfig } from '../types/visualization-configs';
 
 // Import persistence service
 import { canvasPersistence, CanvasRecord } from '../services/canvas-persistence.service';
@@ -53,6 +53,42 @@ import { canvasPersistence, CanvasRecord } from '../services/canvas-persistence.
 // ==================== CONFIGURATION DIALOGS ====================
 import { DataSummaryConfigDialog } from '../components/analytics/DataSummaryConfigDialog';
 import { BoxPlotConfigDialog } from '../components/visualization/BoxPlotConfigDialog';
+import { CorrelationConfigDialog } from '@/components/analytics/CorrelationConfigDialog';
+import { ForecastConfigDialog } from '@/components/analytics/ForecastConfigDialog';
+import { PivotAnalyticsConfigDialog } from '@/components/analytics/PivotAnalyticsConfigDialog';
+import { ClusterConfigDialog } from '@/components/analytics/ClusterConfigDialog';
+import { ReferenceLineConfigDialog } from '@/components/analytics/ReferenceLineConfigDialog';
+import { TrendLineConfigDialog } from '@/components/analytics/TrendLineConfigDialog';
+import { MovingAverageConfigDialog } from '@/components/analytics/MovingAverageConfigDialog';
+import { PercentileConfigDialog } from '@/components/analytics/PercentileConfigDialog';
+import { RankConfigDialog } from '@/components/analytics/RankConfigDialog';
+import { RunningTotalConfigDialog } from '@/components/analytics/RunningTotalConfigDialog';
+import { StatisticalSummaryConfigDialog } from '@/components/analytics/StatisticalSummaryConfigDialog';
+import { BarChartConfigDialog } from '@/components/visualization/BarChartConfigDialog';
+import { LineChartConfigDialog } from '@/components/visualization/LineChartConfigDialog';
+import { PieChartConfigDialog } from '@/components/visualization/PieChartConfigDialog';
+import { ScatterPlotConfigDialog } from '@/components/visualization/ScatterPlotConfigDialog';
+import { HistogramConfigDialog } from '@/components/visualization/HistogramConfigDialog';
+import { HeatmapConfigDialog } from '@/components/visualization/HeatmapConfigDialog';
+import { KpiConfigDialog } from '@/components/visualization/KpiConfigDialog';
+import { MapConfigDialog } from '@/components/visualization/MapConfigDialog';
+import { GaugeConfigDialog } from '@/components/visualization/GaugeConfigDialog';
+import { FunnelConfigDialog } from '@/components/visualization/FunnelConfigDialog';
+import { TreemapConfigDialog } from '@/components/visualization/TreemapConfigDialog';
+import { AreaChartConfigDialog } from '@/components/visualization/AreaChartConfigDialog';
+import { ScatterMatrixConfigDialog } from '@/components/visualization/ScatterMatrixConfigDialog';
+import { DualAxisConfigDialog } from '@/components/visualization/DualAxisConfigDialog';
+import { ParetoChartConfigDialog } from '@/components/visualization/ParetoChartConfigDialog';
+import { WordCloudConfigDialog } from '@/components/visualization/WordCloudConfigDialog';
+
+// ==================== NEW DIALOGS ====================
+import { OutlierDetectionConfigDialog } from '@/components/analytics/OutlierDetectionConfigDialog';
+import { BubbleChartConfigDialog } from '@/components/visualization/BubbleChartConfigDialog';
+
+// ==================== MISSING ANALYTICS DIALOGS (ADDED) ====================
+import { SliceConfigDialog } from '@/components/analytics/SliceConfigDialog';
+import { DrillDownConfigDialog } from '@/components/analytics/DrillDownConfigDialog';
+import { FilterConfigDialog } from '@/components/analytics/FilterConfigDialog';
 
 // ==================== CONNECTION VALIDATION ====================
 import { validateConnection } from '../utils/connectionValidation';
@@ -279,8 +315,8 @@ const createEdgeWithMetadata = (
   const edgeId = `edge-${connection.source}-${connection.target}-${Date.now()}`;
 
   const relationType = determineRelationType(sourceNode, targetNode);
-  const sourceFields = sourceNode.data?.schemas?.output?.fields?.map(f => f.name) || [];
-  const targetFields = targetNode.data?.schemas?.input?.[0]?.fields?.map(f => f.name) || [];
+  const sourceFields = sourceNode.data?.schemas?.output?.fields?.map((f: FieldSchema) => f.name) || [];
+  const targetFields = targetNode.data?.schemas?.input?.[0]?.fields?.map((f: FieldSchema) => f.name) || [];
 
   const edgeMeta: FlowEdgeMeta = {
     relationType,
@@ -377,7 +413,7 @@ const extractInputSchema = (nodeId: string, nodes: Node[], edges: Edge[]): Array
   const sourceNodeId = incomingEdges[0].source;
   const sourceNode = nodes.find(n => n.id === sourceNodeId);
   if (sourceNode && sourceNode.data?.schemas?.output?.fields) {
-    return sourceNode.data.schemas.output.fields.map((f: any) => ({
+    return sourceNode.data.schemas.output.fields.map((f: FieldSchema) => ({
       name: f.name,
       type: f.type || 'string'
     }));
@@ -391,7 +427,7 @@ function buildSummaryOutputSchema(
   inputFields: FieldSchema[]
 ): { id: string; name: string; fields: FieldSchema[]; isTemporary: boolean; isMaterialized: boolean } {
   const fieldMap = new Map<string, DataType>();
-  inputFields.forEach(f => fieldMap.set(f.name, f.type));
+  inputFields.forEach((f: FieldSchema) => fieldMap.set(f.name, f.type));
 
   const outputFields: FieldSchema[] = [];
   const usedNames = new Set<string>();
@@ -1008,6 +1044,736 @@ const Canvas = forwardRef<{ forceSave: () => Promise<void> }, ExtendedCanvasProp
   }, [nodes, reactFlowInstance, centerNodes, state.viewport]);
 
   // ==================== PER‑TYPE CONFIGURATION SAVE HANDLERS ====================
+const handleForecastConfigSave = useCallback((nodeId: string, config: ForecastConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema based on config
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: FieldSchema[] = [];
+
+      // Add grouping columns if any
+      if (config.groupBy) {
+        config.groupBy.forEach(col => {
+          const field = inputFields.find((f: FieldSchema) => f.name === col);
+          if (field) {
+            // Preserve original field metadata including isKey
+            outputFields.push({ ...field, id: `${nodeId}_${col}` });
+          } else {
+            // Fallback if column not found in input (should not happen)
+            outputFields.push({
+              id: `${nodeId}_${col}`,
+              name: col,
+              type: 'STRING',
+              nullable: true,
+              isKey: false,
+            });
+          }
+        });
+      }
+
+      // Add time column
+      const timeField = inputFields.find((f: FieldSchema) => f.name === config.timeColumn);
+      if (timeField) {
+        outputFields.push({ ...timeField, id: `${nodeId}_time` });
+      } else {
+        outputFields.push({
+          id: `${nodeId}_time`,
+          name: config.timeColumn,
+          type: 'TIMESTAMP', // assume timestamp; adjust if needed
+          nullable: true,
+          isKey: false,
+        });
+      }
+
+      // Add forecast value column
+      outputFields.push({
+        id: `${nodeId}_forecast_value`,
+        name: config.output.forecastAlias || 'forecast',
+        type: 'DECIMAL',
+        nullable: true,
+        isKey: false,
+      });
+
+      // Add confidence intervals if requested
+      if (config.output.includeConfidence) {
+        outputFields.push({
+          id: `${nodeId}_lower_bound`,
+          name: 'lower_bound',
+          type: 'DECIMAL',
+          nullable: true,
+          isKey: false,
+        });
+        outputFields.push({
+          id: `${nodeId}_upper_bound`,
+          name: 'upper_bound',
+          type: 'DECIMAL',
+          nullable: true,
+          isKey: false,
+        });
+      }
+
+      const outputSchema = {
+        id: `${nodeId}_output`,
+        name: 'Forecast Output',
+        fields: outputFields,
+        isTemporary: true,
+        isMaterialized: false,
+      };
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'forecast',
+          },
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: outputSchema,
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleRunningTotalConfigSave = useCallback((nodeId: string, config: RunningTotalConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: FieldSchema[] = [];
+
+      // If includeAllColumns, keep all input fields
+      if (config.includeAllColumns) {
+        outputFields.push(...inputFields);
+      } else {
+        // Otherwise add partition columns, order columns, and value column (keeping original types)
+        const addField = (name: string) => {
+          const field = inputFields.find((f: FieldSchema) => f.name === name);
+          if (field) {
+            outputFields.push({ ...field, id: `${nodeId}_${name}` });
+          } else {
+            outputFields.push({
+              id: `${nodeId}_${name}`,
+              name,
+              type: 'STRING', // fallback
+              nullable: true,
+              isKey: false,
+            });
+          }
+        };
+        config.partitionBy?.forEach(addField);
+        config.orderBy.forEach(o => addField(o.column));
+        addField(config.valueColumn);
+      }
+
+      // Add running total alias
+      outputFields.push({
+        id: `${nodeId}_${config.alias || 'running_total'}`,
+        name: config.alias || 'running_total',
+        type: 'DECIMAL', // running total is numeric
+        nullable: true,
+        isKey: false,
+      });
+
+      const outputSchema = {
+        id: `${nodeId}_output`,
+        name: 'Running Total Output',
+        fields: outputFields,
+        isTemporary: true,
+        isMaterialized: false,
+      };
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'running-total',
+          },
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: outputSchema,
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleLineChartConfigSave = useCallback((nodeId: string, config: LineChartConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'line-chart',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleBarChartConfigSave = useCallback((nodeId: string, config: BarChartConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'bar-chart',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+// Inside Canvas.tsx, add handler
+const handlePercentileConfigSave = useCallback((nodeId: string, config: PercentileConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: FieldSchema[] = [];
+
+      // Add group by columns (preserve types from input)
+      config.groupBy?.forEach(col => {
+        const field = inputFields.find((f: FieldSchema) => f.name === col);
+        outputFields.push({
+          id: `${nodeId}_${col}`,
+          name: col,
+          type: field?.type || 'STRING',
+          nullable: true,
+          isKey: false,
+        });
+      });
+
+      // Add percentile columns (always DECIMAL)
+      const aliasBase = config.output?.aliasBase || 'p';
+      config.percentiles.forEach(p => {
+        const alias = `${aliasBase}${Math.round(p * 100)}`;
+        outputFields.push({
+          id: `${nodeId}_${alias}`,
+          name: alias,
+          type: 'DECIMAL',
+          nullable: true,
+          isKey: false,
+        });
+      });
+
+      const outputSchema = {
+        id: `${nodeId}_output`,
+        name: 'Percentile Output',
+        fields: outputFields,
+        isTemporary: true,
+        isMaterialized: false,
+      };
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'percentile',
+          },
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: outputSchema,
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleMovingAverageConfigSave = useCallback((nodeId: string, config: MovingAverageConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema: keep partition columns + order column + value column + alias
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: FieldSchema[] = [];
+
+      // Add partition columns
+      if (config.partitionBy) {
+        config.partitionBy.forEach(col => {
+          const field = inputFields.find((f: FieldSchema) => f.name === col);
+          if (field) outputFields.push({ ...field, id: `${nodeId}_${col}` });
+        });
+      }
+
+      // Add order column
+      const orderField = inputFields.find((f: FieldSchema) => f.name === config.orderByColumn);
+      if (orderField) outputFields.push({ ...orderField, id: `${nodeId}_${config.orderByColumn}` });
+
+      // Add value column
+      const valueField = inputFields.find((f: FieldSchema) => f.name === config.valueColumn);
+      if (valueField) outputFields.push({ ...valueField, id: `${nodeId}_${config.valueColumn}` });
+
+      // Add moving average alias
+      outputFields.push({
+        id: `${nodeId}_${config.alias}`,
+        name: config.alias || 'moving_avg',
+        type: 'DECIMAL', // moving average yields decimal
+        nullable: true,
+        isKey: false,
+      });
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'moving-average',
+          },
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${nodeId}_output`,
+            name: 'Moving Average Output',
+            fields: outputFields,
+            isTemporary: true,
+            isMaterialized: false,
+          },
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleTrendLineConfigSave = useCallback((nodeId: string, config: TrendLineConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Update node's configuration and schemas (output schema is dynamic)
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'trend-line',
+          },
+        },
+        // Optionally update output schema based on config
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${node.id}_output`,
+            name: 'Trend Line Output',
+            fields: [], // Could be built from config, but processor will handle
+            isTemporary: true,
+            isMaterialized: false,
+          },
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleReferenceLineConfigSave = useCallback((nodeId: string, config: ReferenceLineConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema: keep all input fields + new reference line columns
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields = [...inputFields];
+
+      config.definitions.forEach(def => {
+        const alias = def.alias || `${def.type}_${def.column || 'value'}`;
+        // Determine data type (simplified: for constant, use number; for others, keep numeric)
+        let type: DataType = 'DECIMAL';
+        if (def.type === 'constant') type = 'DECIMAL';
+        else if (def.type === 'average' || def.type === 'median' || def.type === 'percentile') type = 'DECIMAL';
+        else if (def.type === 'custom') type = 'STRING'; // fallback
+
+        outputFields.push({
+          id: `${nodeId}_${alias}`,
+          name: alias,
+          type,
+          nullable: true,
+          isKey: false,
+        });
+      });
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'reference-line'
+          }
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${nodeId}_output`,
+            name: 'Reference Line Output',
+            fields: outputFields,
+            isTemporary: true,
+            isMaterialized: false
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleClusterConfigSave = useCallback((nodeId: string, config: ClusterConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema based on config
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: FieldSchema[] = [];
+
+      // Add all original numeric columns? Or just cluster assignment? Usually we want original columns + cluster id.
+      // Here we keep all input columns (since clustering doesn't change them) and add the cluster column.
+      outputFields.push(...inputFields);
+
+      // Add cluster assignment column
+      outputFields.push({
+        id: `${nodeId}_${config.output.clusterColumn}`,
+        name: config.output.clusterColumn,
+        type: 'INTEGER', // cluster IDs are integers
+        nullable: true,
+        isKey: false,
+      });
+
+      // Optionally add centroid columns if includeCentroids is true – depends on SQL implementation
+      // For simplicity we just add the cluster column.
+
+      const outputSchema = {
+        id: `${nodeId}_output`,
+        name: 'Cluster Output',
+        fields: outputFields,
+        isTemporary: true,
+        isMaterialized: false,
+      };
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config,
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'cluster', // you may need to add 'cluster' to AnalyticType
+          },
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: outputSchema,
+        },
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleKpiConfigSave = useCallback((nodeId: string, config: KpiConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'kpi',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleHeatmapConfigSave = useCallback((nodeId: string, config: HeatmapConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'heatmap',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleHistogramConfigSave = useCallback((nodeId: string, config: HistogramConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'histogram',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleScatterPlotConfigSave = useCallback((nodeId: string, config: ScatterPlotConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'scatter-plot', // ensure chartType matches
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleFunnelConfigSave = useCallback((nodeId: string, config: FunnelConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'funnel',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleWaterfallConfigSave = useCallback((nodeId: string, config: WaterfallConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'waterfall',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleParetoConfigSave = useCallback((nodeId: string, config: ParetoChartConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+            parameters: config,
+            chartType: 'pareto',
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+  const handlePivotConfigSave = useCallback((nodeId: string, config: PivotConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Update node's configuration and schemas (output schema is dynamic, we might not compute it here)
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'pivot'
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
   const handleDataSummaryConfigSave = useCallback((nodeId: string, config: DataSummaryConfig) => {
     setNodes(prev => prev.map(node => {
       if (node.id === nodeId) {
@@ -1068,76 +1834,1307 @@ const Canvas = forwardRef<{ forceSave: () => Promise<void> }, ExtendedCanvasProp
   debouncedAutoSave();
 }, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
 
+const handleFilterConfigSave = useCallback((nodeId: string, config: FilterConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Output schema: either selected columns or all input columns
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      let outputFields = inputFields;
+      if (config.outputColumns && config.outputColumns.length > 0) {
+        outputFields = inputFields.filter((f: FieldSchema) => config.outputColumns!.includes(f.name));
+      }
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'filter'
+          }
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${node.id}_output`,
+            name: 'Filter Output',
+            fields: outputFields,
+            isTemporary: true,
+            isMaterialized: false
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleCorrelationConfigSave = useCallback((nodeId: string, config: CorrelationConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'correlation'
+          }
+        },
+        // Optionally update output schema (simple version: pairs or matrix columns)
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${node.id}_output`,
+            name: 'Correlation Output',
+            fields: [], // Could build from config, but processor will handle
+            isTemporary: true,
+            isMaterialized: false
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+
+const handleDrillDownConfigSave = useCallback((nodeId: string, config: DrillDownConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Build output schema: hierarchy columns + measure aliases
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const outputFields: { id: string; name: string; type: any; nullable: boolean; }[] = [];
+
+      // Hierarchy columns (use original names)
+      config.hierarchy.forEach(colName => {
+        const field = inputFields.find((f: FieldSchema) => f.name === colName);
+        outputFields.push({
+          id: `${colName}_hierarchy`,
+          name: colName,
+          type: field?.type || 'STRING',
+          nullable: true,
+        });
+      });
+
+      // Measure columns (use alias if provided, else column_aggregation)
+      config.measures.forEach(m => {
+        if (!m.column) return;
+        const alias = m.alias || `${m.aggregation}_${m.column}`;
+        // Determine data type from aggregation
+        let type: DataType = 'DECIMAL';
+        if (m.aggregation === 'count') type = 'INTEGER';
+        else if (['min', 'max'].includes(m.aggregation)) {
+          const field = inputFields.find((f: FieldSchema) => f.name === m.column);
+          type = field?.type || 'DECIMAL';
+        }
+        outputFields.push({
+          id: alias,
+          name: alias,
+          type,
+          nullable: true,
+        });
+      });
+
+      const outputSchema = {
+        id: `${node.id}_output`,
+        name: 'Drill‑Down Output',
+        fields: outputFields,
+        isTemporary: true,
+        isMaterialized: false,
+      };
+
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'drilldown'  // you may need to add this to your AnalyticsComponentConfiguration
+          }
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: outputSchema
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
+const handleSliceConfigSave = useCallback((nodeId: string, config: SliceConfig) => {
+  setNodes(prev => prev.map(node => {
+    if (node.id === nodeId) {
+      // Update output schema: same as input (no structural change)
+      const inputFields = node.data?.schemas?.input?.[0]?.fields || [];
+      const updatedData = {
+        ...node.data,
+        metadata: {
+          ...node.data.metadata,
+          configuration: config
+        },
+        configuration: {
+          ...node.data.configuration,
+          config: {
+            ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+            parameters: config,
+            analyticType: 'slice'
+          }
+        },
+        schemas: {
+          ...node.data.schemas,
+          output: {
+            id: `${node.id}_output`,
+            name: 'Slice Output',
+            fields: inputFields,  // same fields, just filtered rows
+            isTemporary: true,
+            isMaterialized: false
+          }
+        }
+      };
+      return { ...node, data: updatedData };
+    }
+    return node;
+  }));
+  syncNodesAndEdges(nodes, edges);
+  debouncedAutoSave();
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
+
   // Unified dispatcher called by dialogs
   const handleConfigSave = useCallback((nodeId: string, componentKey: string, config: any) => {
-    switch (componentKey) {
-      case 'data-summary':
-        handleDataSummaryConfigSave(nodeId, config);
-        break;
-      case 'box-plot':
-        handleBoxPlotConfigSave(nodeId, config);
-        break;
-      default:
-        console.warn(`Unknown component key: ${componentKey}`);
-    }
-    setConfigDialog(null);
-  }, [handleDataSummaryConfigSave, handleBoxPlotConfigSave]);
+  switch (componentKey) {
+    case 'data-summary':
+      handleDataSummaryConfigSave(nodeId, config);
+      break;
+    case 'box-plot':
+      handleBoxPlotConfigSave(nodeId, config);
+      break;
+    case 'filter':
+      handleFilterConfigSave(nodeId, config);
+      break;
+    case 'slice':
+      handleSliceConfigSave(nodeId, config);
+      break;
+    case 'drill-down':
+      handleDrillDownConfigSave(nodeId, config);
+      break;
+    case 'correlation':
+      handleCorrelationConfigSave(nodeId, config);
+      break;
+    case 'forecast':
+      handleForecastConfigSave(nodeId, config);
+      break;    
+    case 'bar-chart':
+      handleBarChartConfigSave(nodeId, config);
+      break;
+    case 'line-chart':
+      handleLineChartConfigSave(nodeId, config);
+      break;
+    case 'scatter-plot':
+      handleScatterPlotConfigSave(nodeId, config);
+      break;
+    case 'histogram':
+      handleHistogramConfigSave(nodeId, config);
+      break;
+    case 'heatmap':
+      handleHeatmapConfigSave(nodeId, config);
+      break;
+    case 'kpi':
+      handleKpiConfigSave(nodeId, config);
+      break;
+    case 'waterfall':
+      handleWaterfallConfigSave(nodeId, config);
+      break;
+    case 'pareto':
+      handleParetoConfigSave(nodeId, config);
+      break;
+    case 'pivot':
+      handlePivotConfigSave(nodeId, config);
+      // Inline pivot logic (or call a dedicated function)
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+                parameters: config,
+                analyticType: 'pivot'
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'cluster':
+      handleClusterConfigSave(nodeId, config);
+      break;
+    case 'reference-line':
+      handleReferenceLineConfigSave(nodeId, config);
+      break;
+    case 'trend-line':
+      handleTrendLineConfigSave(nodeId, config);
+      break;
+    case 'moving-average':
+      handleMovingAverageConfigSave(nodeId, config);
+      break;
+    case 'percentile':
+      handlePercentileConfigSave(nodeId, config);
+      break;
+    case 'running-total':
+      handleRunningTotalConfigSave(nodeId, config);
+      break;
+    case 'rank':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+                parameters: config,
+                analyticType: 'rank'
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'statistical-summary':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config,
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+                parameters: config,
+                analyticType: 'statistical-summary',
+              },
+            },
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'pie-chart':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'pie-chart',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'map':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'map',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'gauge':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'gauge',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'treemap':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'treemap',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'area-chart':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'area-chart',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'dual-axis':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'dual-axis',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'word-cloud':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: {
+              ...node.data.metadata,
+              configuration: config
+            },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'word-cloud',
+              }
+            }
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    // ==================== NEW CASES ====================
+    case 'outlier-detection':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'ANALYTICS' ? node.data.configuration.config : {}),
+                parameters: config,
+                analyticType: 'outlier-detection',
+              },
+            },
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'bubble-chart':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'bubble-chart',
+              },
+            },
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    case 'scatter-matrix':
+      setNodes(prev => prev.map(node => {
+        if (node.id === nodeId) {
+          const updatedData = {
+            ...node.data,
+            metadata: { ...node.data.metadata, configuration: config },
+            configuration: {
+              ...node.data.configuration,
+              config: {
+                ...(node.data.configuration.type === 'VISUALIZATION' ? node.data.configuration.config : {}),
+                parameters: config,
+                chartType: 'scatter-matrix',
+              },
+            },
+          };
+          return { ...node, data: updatedData };
+        }
+        return node;
+      }));
+      syncNodesAndEdges(nodes, edges);
+      debouncedAutoSave();
+      break;
+    default:
+      console.warn(`Unknown component key: ${componentKey}`);
+  }
+  setConfigDialog(null);
+}, [nodes, edges, syncNodesAndEdges, debouncedAutoSave]);
 
   // ==================== DOUBLE‑CLICK HANDLER FOR CONFIGURATION ====================
-  const handleCanvasNodeDoubleClick = useCallback((event: CustomEvent) => {
-    const { componentMetadata } = event.detail;
-    if (!componentMetadata) return;
+  // ==================== DOUBLE‑CLICK HANDLER FOR CONFIGURATION ====================
+const handleCanvasNodeDoubleClick = useCallback((event: CustomEvent) => {
+  const { componentMetadata } = event.detail;
+  if (!componentMetadata) return;
 
-    const nodeId = componentMetadata.id;
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node) return;
+  const nodeId = componentMetadata.id;
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return;
 
-    const componentKey = componentMetadata.componentKey;
-    const existingConfig = node.data.metadata?.configuration || {};
+  const componentKey = componentMetadata.componentKey;
+  const existingConfig = node.data.metadata?.configuration || {};
 
-    // Gather input schema from connected upstream nodes
-    const inputSchema = extractInputSchema(nodeId, nodes, edges);
+  // Gather input schema from connected upstream nodes
+  const inputSchema = extractInputSchema(nodeId, nodes, edges);
 
-    if (componentKey === 'data-summary') {
-      setConfigDialog({
-        nodeId,
-        componentKey,
-        initialMetadata: {
-          ...existingConfig,
-          inputSchema,
-          columns: existingConfig.columns || [],
-          statistics: existingConfig.statistics || {
-            count: true, sum: true, avg: true, min: true, max: true,
-            stddev: false, variance: false
-          },
-          groupBy: existingConfig.groupBy || [],
-          outputTable: existingConfig.outputTable || 'summary_output',
-          options: existingConfig.options || { decimalPlaces: 2, includeNulls: false }
-        }
-      });
-    } else if (componentKey === 'box-plot') {
-      setConfigDialog({
-        nodeId,
-        componentKey,
-        initialMetadata: {
-          ...existingConfig,
-          inputSchema,
-          title: existingConfig.title || '',
-          categoryField: existingConfig.categoryField || '',
-          valueField: existingConfig.valueField || '',
-          orientation: existingConfig.orientation || 'vertical',
-          showOutliers: existingConfig.showOutliers ?? true,
-          whiskerType: existingConfig.whiskerType || 'tukey',
-          percentileRange: existingConfig.percentileRange || { lower: 5, upper: 95 },
-          boxWidth: existingConfig.boxWidth || 40,
-          colors: existingConfig.colors || '#3b82f6',
-          showGrid: existingConfig.showGrid ?? true,
-          showLegend: existingConfig.showLegend ?? false,
-          dimensions: existingConfig.dimensions || { width: 500, height: 400 }
-        }
-      });
-    }
-  }, [nodes, edges]);
+  if (componentKey === 'data-summary') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        columns: existingConfig.columns || [],
+        statistics: existingConfig.statistics || {
+          count: true, sum: true, avg: true, min: true, max: true,
+          stddev: false, variance: false
+        },
+        groupBy: existingConfig.groupBy || [],
+        outputTable: existingConfig.outputTable || 'summary_output',
+        options: existingConfig.options || { decimalPlaces: 2, includeNulls: false }
+      }
+    });
+  } else if (componentKey === 'box-plot') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        categoryField: existingConfig.categoryField || '',
+        valueField: existingConfig.valueField || '',
+        orientation: existingConfig.orientation || 'vertical',
+        showOutliers: existingConfig.showOutliers ?? true,
+        whiskerType: existingConfig.whiskerType || 'tukey',
+        percentileRange: existingConfig.percentileRange || { lower: 5, upper: 95 },
+        boxWidth: existingConfig.boxWidth || 40,
+        colors: existingConfig.colors || '#3b82f6',
+        showGrid: existingConfig.showGrid ?? true,
+        showLegend: existingConfig.showLegend ?? false,
+        dimensions: existingConfig.dimensions || { width: 500, height: 400 }
+      }
+    });
+  } else if (componentKey === 'filter') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        logicalOperator: existingConfig.logicalOperator || 'AND',
+        conditions: existingConfig.conditions || [],
+        outputColumns: existingConfig.outputColumns || [],
+        options: existingConfig.options || {}
+      }
+    });
+  }
+  // 🆕 SLICE BRANCH ADDED
+  else if (componentKey === 'slice') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        column: existingConfig.column || '',
+        operator: existingConfig.operator || 'IN',
+        values: existingConfig.values || [],
+        includeNulls: existingConfig.includeNulls ?? false,
+        caseSensitive: existingConfig.caseSensitive ?? false,
+      }
+    });
+  }
+  else if (componentKey === 'drill-down') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        hierarchy: existingConfig.hierarchy || [],
+        measures: existingConfig.measures || [],
+        filters: existingConfig.filters || [],
+        options: existingConfig.options || {}
+      }
+    });
+  }
+  else if (componentKey === 'pivot') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        rows: existingConfig.rows || [],
+        columns: existingConfig.columns || [],
+        values: existingConfig.values || [],
+        filters: existingConfig.filters || [],
+        sort: existingConfig.sort || [],
+        options: existingConfig.options || {},
+      },
+    });
+  }
+  else if (componentKey === 'correlation') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        columns: existingConfig.columns || [],
+        method: existingConfig.method || 'pearson',
+        missingHandling: existingConfig.missingHandling || 'pairwise',
+        outputFormat: existingConfig.outputFormat || 'pairs',
+        includePValues: existingConfig.includePValues ?? false,
+        pValueThreshold: existingConfig.pValueThreshold,
+        alias: existingConfig.alias || 'correlation_output',
+      }
+    });
+  }
+  else if (componentKey === 'forecast') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        timeColumn: existingConfig.timeColumn || '',
+        valueColumn: existingConfig.valueColumn || '',
+        horizon: existingConfig.horizon || 12,
+        groupBy: existingConfig.groupBy || [],
+        seasonality: existingConfig.seasonality || { enabled: true, period: 'auto' },
+        confidenceLevel: existingConfig.confidenceLevel || 0.95,
+        model: existingConfig.model || 'linear',
+        customSql: existingConfig.customSql || '',
+        transformations: existingConfig.transformations || [],
+        output: existingConfig.output || { includeHistorical: true, includeConfidence: true },
+        filters: existingConfig.filters || [],
+        inputLimit: existingConfig.inputLimit,
+      }
+    });
+  }
+  else if (componentKey === 'cluster') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        columns: existingConfig.columns || [],
+        method: existingConfig.method || 'kmeans',
+        numberOfClusters: existingConfig.numberOfClusters || 3,
+        distanceMetric: existingConfig.distanceMetric || 'euclidean',
+        scaling: existingConfig.scaling ?? true,
+        scalingMethod: existingConfig.scalingMethod || 'standard',
+        parameters: existingConfig.parameters || {},
+        output: existingConfig.output || { clusterColumn: 'cluster_id', alias: 'clustering_output' },
+        filters: existingConfig.filters || [],
+        inputLimit: existingConfig.inputLimit,
+      }
+    });
+  }
+  else if (componentKey === 'reference-line') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        definitions: existingConfig.definitions || [],
+        groupBy: existingConfig.groupBy || [],
+        filters: existingConfig.filters || [],
+        options: existingConfig.options || {},
+      }
+    });
+  }
+  else if (componentKey === 'trend-line') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        xColumn: existingConfig.xColumn || '',
+        yColumn: existingConfig.yColumn || '',
+        groupBy: existingConfig.groupBy || [],
+        model: existingConfig.model || 'linear',
+        polynomialDegree: existingConfig.polynomialDegree || 2,
+        customSql: existingConfig.customSql || '',
+        includeConfidence: existingConfig.includeConfidence ?? false,
+        confidenceLevel: existingConfig.confidenceLevel || 0.95,
+        output: existingConfig.output || {
+          fittedValues: true,
+          includeStatistics: true,
+          fittedAlias: 'trend_value',
+          lowerBoundAlias: 'lower_bound',
+          upperBoundAlias: 'upper_bound',
+          alias: 'trend_output',
+        },
+        filters: existingConfig.filters || [],
+        inputLimit: existingConfig.inputLimit,
+      },
+    });
+  }
+  else if (componentKey === 'moving-average') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        orderByColumn: existingConfig.orderByColumn || '',
+        valueColumn: existingConfig.valueColumn || '',
+        partitionBy: existingConfig.partitionBy || [],
+        windowSize: existingConfig.windowSize ?? 3,
+        alias: existingConfig.alias || 'moving_avg',
+        filters: existingConfig.filters || [],
+        limit: existingConfig.limit,
+      },
+    });
+  }
+  else if (componentKey === 'percentile') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        valueColumn: existingConfig.valueColumn || '',
+        percentiles: existingConfig.percentiles || [0.25, 0.5, 0.75],
+        groupBy: existingConfig.groupBy || [],
+        filters: existingConfig.filters || [],
+        output: existingConfig.output || { aliasBase: 'p', tableName: 'percentile_output' },
+        options: existingConfig.options || { method: 'continuous', distinct: false, limit: undefined },
+      },
+    });
+  }
+  else if (componentKey === 'rank') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        orderBy: existingConfig.orderBy || [],
+        partitionBy: existingConfig.partitionBy || [],
+        function: existingConfig.function || 'rank',
+        ntileBuckets: existingConfig.ntileBuckets || 4,
+        alias: existingConfig.alias || '',
+        customExpression: existingConfig.customExpression || '',
+        filters: existingConfig.filters || [],
+        limit: existingConfig.limit,
+        includeAllColumns: existingConfig.includeAllColumns ?? true,
+      },
+    });
+  }
+  else if (componentKey === 'running-total') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        partitionBy: existingConfig.partitionBy || [],
+        orderBy: existingConfig.orderBy || [{ column: '', direction: 'asc' }],
+        valueColumn: existingConfig.valueColumn || '',
+        alias: existingConfig.alias || 'running_total',
+        frame: existingConfig.frame || { start: 'UNBOUNDED PRECEDING', end: 'CURRENT ROW' },
+        filters: existingConfig.filters || [],
+        limit: existingConfig.limit,
+        includeAllColumns: existingConfig.includeAllColumns ?? true,
+      },
+    });
+  }
+  else if (componentKey === 'statistical-summary') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        columns: existingConfig.columns || [],
+        statistics: existingConfig.statistics || {
+          count: true, sum: true, avg: true, min: true, max: true,
+          stddev: false, variance: false, skewness: false, kurtosis: false,
+          median: false, percentiles: [],
+        },
+        groupBy: existingConfig.groupBy || [],
+        filters: existingConfig.filters || [],
+        outputTable: existingConfig.outputTable || 'statistical_summary',
+        options: existingConfig.options || { decimalPlaces: 2, includeNulls: false, distinct: false, limit: undefined },
+      },
+    });
+  }
+  else if (componentKey === 'line-chart') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        xField: existingConfig.xField || '',
+        yField: existingConfig.yField || '',
+        colorField: existingConfig.colorField || '',
+        sizeField: existingConfig.sizeField || '',
+        facetField: existingConfig.facetField || '',
+        lineType: existingConfig.lineType || 'linear',
+        lineWidth: existingConfig.lineWidth ?? 2,
+        showMarkers: existingConfig.showMarkers ?? false,
+        fillArea: existingConfig.fillArea ?? false,
+        stackSeries: existingConfig.stackSeries ?? false,
+        showLegend: existingConfig.showLegend ?? false,
+        showGrid: existingConfig.showGrid ?? true,
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+      }
+    });
+  }
+  else if (componentKey === 'pie-chart') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        angleField: existingConfig.angleField || '',
+        colorField: existingConfig.colorField || '',
+        seriesField: existingConfig.seriesField || '',
+        multiPieMode: existingConfig.multiPieMode || 'single',
+        innerRadius: existingConfig.innerRadius ?? 0,
+        outerRadius: existingConfig.outerRadius ?? 0.8,
+        startAngle: existingConfig.startAngle ?? 0,
+        endAngle: existingConfig.endAngle ?? 360,
+        roseType: existingConfig.roseType ?? false,
+        clockwise: existingConfig.clockwise ?? true,
+        avoidLabelOverlap: existingConfig.avoidLabelOverlap ?? false,
+        labelLine: existingConfig.labelLine || { show: true, length: 15, length2: 15 },
+        colorScheme: existingConfig.colorScheme || '#3b82f6',
+        opacity: existingConfig.opacity ?? 1,
+        labels: existingConfig.labels || { show: true, position: 'outside', fontSize: 12 },
+        showLegend: existingConfig.showLegend ?? true,
+        legend: existingConfig.legend || { position: 'top', orient: 'horizontal' },
+        tooltip: existingConfig.tooltip || { show: true },
+        interactivity: existingConfig.interactivity || { hoverHighlight: true },
+        animation: existingConfig.animation || { enabled: true },
+        dimensions: existingConfig.dimensions || { width: 500, height: 400 },
+        exportable: existingConfig.exportable ?? true,
+        responsive: existingConfig.responsive || { enabled: true },
+      }
+    });
+  }
+  else if (componentKey === 'scatter-plot') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  else if (componentKey === 'histogram') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        xField: existingConfig.xField || '',
+        colorField: existingConfig.colorField || '',
+        facetField: existingConfig.facetField || '',
+        binning: existingConfig.binning || { method: 'auto', bins: 30 },
+        orientation: existingConfig.orientation || 'vertical',
+        normalization: existingConfig.normalization || 'count',
+        cumulative: existingConfig.cumulative ?? false,
+        barStyle: existingConfig.barStyle || {
+          fillColor: '#3b82f6',
+          fillOpacity: 0.7,
+          borderColor: '#1e3a8a',
+          borderWidth: 1,
+          borderRadius: 0,
+          gap: 1,
+        },
+        colorScheme: existingConfig.colorScheme || '#3b82f6',
+        colorGradient: existingConfig.colorGradient ?? false,
+        gradientDirection: existingConfig.gradientDirection || 'vertical',
+        xAxis: existingConfig.xAxis || {
+          visible: true,
+          title: '',
+          tickFormat: '',
+          tickCount: undefined,
+          tickLabelRotation: 0,
+          lineColor: '#cccccc',
+          lineWidth: 1,
+          tickColor: '#999999',
+          tickSize: 6,
+          scaleType: 'linear',
+        },
+        yAxis: existingConfig.yAxis || {
+          visible: true,
+          title: '',
+          tickFormat: '',
+          tickCount: undefined,
+          lineColor: '#cccccc',
+          lineWidth: 1,
+          tickColor: '#999999',
+          tickSize: 6,
+          scaleType: 'linear',
+          zeroBaseline: true,
+        },
+        showGrid: existingConfig.showGrid ?? true,
+        grid: existingConfig.grid || { color: '#e5e5e5', width: 0.5, dash: '', xLines: false, yLines: true },
+        showLegend: existingConfig.showLegend ?? false,
+        legend: existingConfig.legend || { position: 'top', orient: 'horizontal', itemGap: 10 },
+        tooltip: existingConfig.tooltip || { show: true, trigger: 'axis' },
+        dataLabels: existingConfig.dataLabels || { show: false, position: 'top', fontSize: 11 },
+        interactivity: existingConfig.interactivity || { zoom: true, pan: true, selection: 'none' },
+        animation: existingConfig.animation || { enabled: true, duration: 300, easing: 'ease' },
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+        responsive: existingConfig.responsive || { enabled: true },
+        exportable: existingConfig.exportable ?? true,
+        exportFormats: existingConfig.exportFormats || ['png', 'svg', 'pdf'],
+        accessibility: existingConfig.accessibility || { ariaLabel: 'Histogram chart', highContrast: false, focusable: true },
+        performance: existingConfig.performance || { downsampling: false, progressive: false },
+      }
+    });
+  }
+  else if (componentKey === 'heatmap') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        xField: existingConfig.xField || '',
+        yField: existingConfig.yField || '',
+        valueField: existingConfig.valueField || '',
+        groupField: existingConfig.groupField || '',
+      }
+    });
+  }
+  else if (componentKey === 'kpi') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        primaryValueField: existingConfig.primaryValueField || '',
+        secondaryValueField: existingConfig.secondaryValueField || '',
+        labelField: existingConfig.labelField || '',
+        numberFormat: existingConfig.numberFormat || ',.2f',
+        prefix: existingConfig.prefix || '',
+        suffix: existingConfig.suffix || '',
+        decimalPlaces: existingConfig.decimalPlaces ?? 2,
+        comparison: existingConfig.comparison || { type: 'none' },
+        primaryColor: existingConfig.primaryColor || '#000000',
+        labelColor: existingConfig.labelColor || '#666666',
+        backgroundColor: existingConfig.backgroundColor || '#ffffff',
+        border: existingConfig.border || { color: '#ccc', width: 1, radius: 4, style: 'solid' },
+        shadow: existingConfig.shadow ?? false,
+        padding: existingConfig.padding || { top: 8, right: 8, bottom: 8, left: 8 },
+        typography: existingConfig.typography || {},
+        sparkline: existingConfig.sparkline || { enabled: false },
+        tooltip: existingConfig.tooltip || { show: false },
+        clickAction: existingConfig.clickAction || 'none',
+        hoverEffect: existingConfig.hoverEffect ?? true,
+        responsive: existingConfig.responsive || { enabled: false },
+        exportable: existingConfig.exportable ?? true,
+        exportFormats: existingConfig.exportFormats || ['png'],
+        accessibility: existingConfig.accessibility || {},
+        dimensions: existingConfig.dimensions || { width: 200, height: 100 },
+      }
+    });
+  }
+  else if (componentKey === 'map') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  else if (componentKey === 'gauge') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  else if (componentKey === 'funnel') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        stageField: existingConfig.stageField || '',
+        valueField: existingConfig.valueField || '',
+        groupField: existingConfig.groupField || '',
+        orientation: existingConfig.orientation || 'vertical',
+        shape: existingConfig.shape || 'trapezoid',
+        barWidth: existingConfig.barWidth,
+        barGap: existingConfig.barGap ?? 2,
+        stageOrder: existingConfig.stageOrder || 'descending',
+        customStageOrder: existingConfig.customStageOrder || [],
+        barStyle: existingConfig.barStyle || {
+          fillColor: '#3b82f6',
+          fillOpacity: 0.8,
+          borderColor: '#1e3a8a',
+          borderWidth: 1,
+          borderRadius: 0
+        },
+        colorScheme: existingConfig.colorScheme || '#3b82f6',
+        colorGradient: existingConfig.colorGradient ?? false,
+        gradientDirection: existingConfig.gradientDirection || 'vertical',
+        showGrid: existingConfig.showGrid ?? true,
+        showLegend: existingConfig.showLegend ?? false,
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+        dataLabels: existingConfig.dataLabels || { show: false, position: 'inside', fontSize: 11 },
+        tooltip: existingConfig.tooltip || { show: true },
+        legend: existingConfig.legend || { show: false, position: 'top' },
+        interactivity: existingConfig.interactivity || { zoom: false, pan: false, selection: 'none' },
+        animation: existingConfig.animation || { enabled: true },
+        responsive: existingConfig.responsive || { enabled: true },
+        exportable: existingConfig.exportable ?? true,
+        exportFormats: existingConfig.exportFormats || ['png', 'svg', 'pdf'],
+      }
+    });
+  }
+  else if (componentKey === 'treemap') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  else if (componentKey === 'waterfall') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      },
+    });
+  }
+  else if (componentKey === 'area-chart') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        xField: existingConfig.xField || '',
+        yField: existingConfig.yField || '',
+        colorField: existingConfig.colorField || '',
+        sizeField: existingConfig.sizeField || '',
+        facetField: existingConfig.facetField || '',
+        fillOpacity: existingConfig.fillOpacity ?? 0.7,
+        fillGradient: existingConfig.fillGradient ?? false,
+        gradientDirection: existingConfig.gradientDirection || 'vertical',
+        curve: existingConfig.curve || 'monotone',
+        stackMode: existingConfig.stackMode || 'none',
+        baseline: existingConfig.baseline || 'zero',
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+      }
+    });
+  }
+  else if (componentKey === 'dual-axis') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        description: existingConfig.description || '',
+        xField: existingConfig.xField || '',
+        series: existingConfig.series || [],
+        leftAxis: existingConfig.leftAxis || {},
+        rightAxis: existingConfig.rightAxis || {},
+        showGrid: existingConfig.showGrid ?? true,
+        grid: existingConfig.grid || {},
+        showLegend: existingConfig.showLegend ?? true,
+        legend: existingConfig.legend || {},
+        tooltip: existingConfig.tooltip || {},
+        interactivity: existingConfig.interactivity || {},
+        annotations: existingConfig.annotations || [],
+        animation: existingConfig.animation || {},
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+        responsive: existingConfig.responsive || {},
+        exportable: existingConfig.exportable ?? true,
+        exportFormats: existingConfig.exportFormats || ['png'],
+        accessibility: existingConfig.accessibility || {},
+        performance: existingConfig.performance || {},
+      }
+    });
+  }
+  else if (componentKey === 'pareto') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  else if (componentKey === 'word-cloud') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+      }
+    });
+  }
+  // ==================== NEW CASES ====================
+  else if (componentKey === 'outlier-detection') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        columns: existingConfig.columns || [],
+        method: existingConfig.method || 'iqr',
+        threshold: existingConfig.threshold ?? 3,
+        includeZScore: existingConfig.includeZScore ?? false,
+        options: existingConfig.options || {},
+      },
+    });
+  }
+  else if (componentKey === 'bubble-chart') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        xField: existingConfig.xField || '',
+        yField: existingConfig.yField || '',
+        sizeField: existingConfig.sizeField || '',
+        colorField: existingConfig.colorField || '',
+        shapeField: existingConfig.shapeField || '',
+        facetField: existingConfig.facetField || '',
+        point: existingConfig.point || {
+          symbol: 'circle',
+          sizeScale: 'linear',
+          sizeMin: 5,
+          sizeMax: 30,
+          baseSize: 10,
+          opacity: 0.7,
+          color: '#3b82f6',
+          borderColor: '#ffffff',
+          borderWidth: 1,
+        },
+        xAxis: existingConfig.xAxis || { visible: true, title: '' },
+        yAxis: existingConfig.yAxis || { visible: true, title: '' },
+        showGrid: existingConfig.showGrid ?? true,
+        showLegend: existingConfig.showLegend ?? true,
+        dimensions: existingConfig.dimensions || { width: 600, height: 400 },
+      },
+    });
+  }
+  else if (componentKey === 'scatter-matrix') {
+    setConfigDialog({
+      nodeId,
+      componentKey,
+      initialMetadata: {
+        ...existingConfig,
+        inputSchema,
+        title: existingConfig.title || '',
+        columns: existingConfig.columns || [],
+        colorField: existingConfig.colorField || '',
+        sizeField: existingConfig.sizeField || '',
+        matrix: existingConfig.matrix || {
+          columnsPerRow: 3,
+          spacing: 10,
+          diagonalContent: 'histogram',
+          showDiagonalLabels: true,
+          labelPosition: 'corner',
+          sharedAxes: true,
+        },
+        point: existingConfig.point || {
+          symbol: 'circle',
+          size: 5,
+          color: '#3b82f6',
+          opacity: 0.7,
+          borderColor: '#ffffff',
+          borderWidth: 1,
+        },
+        xAxis: existingConfig.xAxis || { visible: true },
+        yAxis: existingConfig.yAxis || { visible: true },
+        showGrid: existingConfig.showGrid ?? true,
+        showLegend: existingConfig.showLegend ?? true,
+        dimensions: existingConfig.dimensions || { width: 800, height: 600 },
+      },
+    });
+  }
+}, [nodes, edges]);
 
   // Attach double-click listener
   useEffect(() => {
@@ -1211,7 +3208,264 @@ const Canvas = forwardRef<{ forceSave: () => Promise<void> }, ExtendedCanvasProp
           onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
         />
       )}
-
+      {configDialog && configDialog.componentKey === 'correlation' && (
+        <CorrelationConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'forecast' && (
+        <ForecastConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'pivot' && (
+        <PivotAnalyticsConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'cluster' && (
+        <ClusterConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'reference-line' && (
+        <ReferenceLineConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'trend-line' && (
+        <TrendLineConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'moving-average' && (
+        <MovingAverageConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'percentile' && (
+        <PercentileConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'rank' && (
+        <RankConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'running-total' && (
+        <RunningTotalConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'statistical-summary' && (
+        <StatisticalSummaryConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'bar-chart' && (
+        <BarChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'line-chart' && (
+        <LineChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'pie-chart' && (
+        <PieChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'scatter-plot' && (
+        <ScatterPlotConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'histogram' && (
+        <HistogramConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'heatmap' && (
+        <HeatmapConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'kpi' && (
+        <KpiConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'map' && (
+        <MapConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'gauge' && (
+        <GaugeConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'funnel' && (
+        <FunnelConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'treemap' && (
+        <TreemapConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'area-chart' && (
+        <AreaChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'scatter-matrix' && (
+        <ScatterMatrixConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'dual-axis' && (
+        <DualAxisConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'pareto' && (
+        <ParetoChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'word-cloud' && (
+        <WordCloudConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {/* ==================== NEW DIALOGS ==================== */}
+      {configDialog && configDialog.componentKey === 'outlier-detection' && (
+        <OutlierDetectionConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'bubble-chart' && (
+        <BubbleChartConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {/* ==================== ADDED MISSING DIALOGS ==================== */}
+      {configDialog && configDialog.componentKey === 'slice' && (
+        <SliceConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'drill-down' && (
+        <DrillDownConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
+      {configDialog && configDialog.componentKey === 'filter' && (
+        <FilterConfigDialog
+          open={true}
+          onClose={() => setConfigDialog(null)}
+          initialMetadata={configDialog.initialMetadata}
+          onSave={(config) => handleConfigSave(configDialog.nodeId, configDialog.componentKey, config)}
+        />
+      )}
       <div
         ref={reactFlowWrapper}
         className="relative w-full h-full canvas-container bg-gray-50"
