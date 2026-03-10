@@ -1,3 +1,5 @@
+// backend/src/database/local-postgres.ts
+
 import { Pool, PoolConfig } from 'pg';
 import { Logger } from './inspection/postgreSql-inspector';
 
@@ -141,15 +143,12 @@ export class LocalPostgresConnectionManager {
       password: config.password,
       database: config.database,
       max: config.connectionLimit,
-      
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
       application_name: 'database-metadata-wizard-backend',
-
-
-    idleTimeoutMillis: config.idleTimeout || 1800000,          // <-- add this line (use config or default)
-    connectionTimeoutMillis: config.acquireTimeout,
-    keepAlive: true,                                           // <-- add this line
-    keepAliveInitialDelayMillis: 1800000,                        // <-- add this line
+      idleTimeoutMillis: config.idleTimeout || 1800000,
+      connectionTimeoutMillis: config.acquireTimeout,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 1800000,
     };
 
     // Create new pool
@@ -375,35 +374,35 @@ export class LocalPostgresConnectionManager {
    * Execute a query using the pool
    */
   public async query(sql: string, params?: any[]): Promise<any> {
-  if (!this.isConnected || !this.pool) {
-    throw new Error('Database connection not established');
+    if (!this.isConnected || !this.pool) {
+      throw new Error('Database connection not established');
+    }
+
+    const client = await this.pool.connect();
+
+    // Attach a one-time error handler to this specific client
+    const errorHandler = (err: Error) => {
+      Logger.error(`Client connection error during query: ${err.message}`);
+      // The client is now unusable; release it (pool will discard it)
+      client.release(err);
+    };
+    client.once('error', errorHandler);
+
+    try {
+      const startTime = Date.now();
+      const result = await client.query(sql, params);
+      const executionTime = Date.now() - startTime;
+      Logger.debug(`Query executed in ${executionTime}ms: ${sql.substring(0, 100)}...`);
+      return result;
+    } catch (queryError) {
+      // Query execution error (SQL syntax, etc.) – not a connection error
+      throw queryError;
+    } finally {
+      // Remove the error handler and release the client
+      client.off('error', errorHandler);
+      client.release();
+    }
   }
-
-  const client = await this.pool.connect();
-
-  // Attach a one-time error handler to this specific client
-  const errorHandler = (err: Error) => {
-    Logger.error(`Client connection error during query: ${err.message}`);
-    // The client is now unusable; release it (pool will discard it)
-    client.release(err);
-  };
-  client.once('error', errorHandler);
-
-  try {
-    const startTime = Date.now();
-    const result = await client.query(sql, params);
-    const executionTime = Date.now() - startTime;
-    Logger.debug(`Query executed in ${executionTime}ms: ${sql.substring(0, 100)}...`);
-    return result;
-  } catch (queryError) {
-    // Query execution error (SQL syntax, etc.) – not a connection error
-    throw queryError;
-  } finally {
-    // Remove the error handler and release the client
-    client.off('error', errorHandler);
-    client.release();
-  }
-}
 
   /**
    * Test current connection
@@ -458,14 +457,109 @@ export class LocalPostgresConnectionManager {
   public getDefaultConfig(): LocalPostgresConfig {
     return { ...this.defaultConfig };
   }
+
+  // ==================== ENVIRONMENT VALIDATION & PROVISIONING ====================
+
+  /**
+   * Ensure required PostgreSQL extensions are installed.
+   */
+  public async ensureExtensions(): Promise<void> {
+    const extensions = ['postgres_fdw', 'file_fdw'];
+    for (const ext of extensions) {
+      await this.query(`CREATE EXTENSION IF NOT EXISTS "${ext}"`);
+      Logger.info(`✅ Extension "${ext}" verified/created`);
+    }
+  }
+
+  /**
+   * Ensure all required foreign servers exist (using file_fdw wrapper).
+   */
+  public async ensureForeignServers(): Promise<void> {
+    const servers = [
+      'fdw_excel',
+      'fdw_xml',
+      'fdw_delimited',
+      'fdw_multiformat',
+      'fdw_regex',
+      'fdw_ldif',
+      'fdw_positional',
+      'fdw_schema'
+    ];
+
+    for (const server of servers) {
+      // Check if server already exists
+      const check = await this.query(
+        `SELECT 1 FROM pg_foreign_server WHERE srvname = $1`,
+        [server]
+      );
+      if (check.rowCount === 0) {
+        await this.query(
+          `CREATE SERVER "${server}" FOREIGN DATA WRAPPER file_fdw`
+        );
+        Logger.info(`✅ Foreign server "${server}" created`);
+      } else {
+        Logger.info(`✅ Foreign server "${server}" already exists`);
+      }
+    }
+  }
+
+  /**
+   * Ensure core application tables exist.
+   */
+  public async ensureTables(): Promise<void> {
+    // Create canvases table
+    await this.query(`
+      CREATE TABLE IF NOT EXISTS canvases (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        data JSONB NOT NULL,
+        version INTEGER DEFAULT 1,
+        owner_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    Logger.info(`✅ Table "canvases" verified/created`);
+
+    // Create data_source_metadata table
+    await this.query(`
+      CREATE TABLE IF NOT EXISTS data_source_metadata (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        file_path TEXT,
+        foreign_table_name VARCHAR(255) NOT NULL,
+        connection_id VARCHAR(255),
+        options JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    Logger.info(`✅ Table "data_source_metadata" verified/created`);
+  }
 }
 
-// Singleton instance
+// ==================== SINGLETON INSTANCE ====================
 export const localPostgres = LocalPostgresConnectionManager.getInstance();
 
-// Helper function to initialize connection at application startup
-export async function initializeLocalPostgresConnection(config?: Partial<LocalPostgresConfig>): Promise<void> {
-  return localPostgres.initializeConnection(config);
+// ==================== INITIALIZATION FUNCTION ====================
+export async function initializeLocalPostgresConnection(
+  config?: Partial<LocalPostgresConfig>
+): Promise<void> {
+  // 1. Connect to PostgreSQL
+  await localPostgres.initializeConnection(config);
+
+  // 2. After successful connection, validate and provision required objects
+  try {
+    await localPostgres.ensureExtensions();
+    await localPostgres.ensureForeignServers();
+    await localPostgres.ensureTables();
+    Logger.info('✅ PostgreSQL environment fully validated and ready');
+  } catch (error) {
+    Logger.error('❌ Failed to setup PostgreSQL environment:', error);
+    // Exit with error to prevent backend from running in an inconsistent state
+    process.exit(1);
+  }
 }
 
 // Helper function to get pool for use in application
@@ -473,5 +567,4 @@ export function getPostgresPool(): Pool {
   return localPostgres.getPool();
 }
 
-// Export for convenience
 export default localPostgres;

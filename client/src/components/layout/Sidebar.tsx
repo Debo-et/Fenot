@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef, useContext } from 'react';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -44,7 +43,6 @@ import { COMPONENT_REGISTRY, getCategoryColor } from '@/pages/ComponentRegistry'
 import { DatabaseContext } from '../../App';
 import { DatabaseApiService } from '../../services/database-api.service';
 import { ColumnDefinition } from '../../api/postgres-foreign-table';
-
 
 // ==================== REVERSE METADATA IMPORTS ====================
 import {
@@ -1396,433 +1394,538 @@ const handleCreateJobWizard = useCallback(() => {
   }
 }, [apiService, isConnected, testConnection]);
 
-  const handleSaveXMLMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
-      return;
+  // Helper to convert a file via a backend endpoint
+  const convertFileViaBackend = useCallback(async (
+    file: File,
+    endpoint: string,
+    additionalFormData?: Record<string, string>
+  ): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (additionalFormData) {
+      Object.entries(additionalFormData).forEach(([key, value]) => {
+        formData.append(key, value);
+      });
     }
-
-    try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
-      }
-
-      const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
-
-      const tableName = generateForeignTableName(metadata, 'xml');
-      const columns = extractColumnsFromMetadata(metadata, 'xml');
-      const filePath = extractFilePath(metadata, 'xml');
-      const options = extractOptions(metadata, 'xml');
-
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in XML metadata.', { autoClose: 5000 });
-        return;
-      }
-
-      const result = await apiService.createForeignTable(
-        connectionId,
-        tableName,
-        columns,
-        'xml',
-        filePath,
-        options
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
-
-      metadata.postgresTableName = result.tableName || tableName;
-
-      window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'xml',
-          folderId: 'file-xml'
-        }
-      }));
-
-      toast.success(`✅ XML foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
-    } catch (error: any) {
-      console.error('❌ Failed to create XML foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+    const response = await fetch(`http://localhost:3000${endpoint}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Conversion failed (${response.status}): ${errorText}`);
     }
-  }, [apiService, isConnected, testConnection]);
+    const result = await response.json();
+    return result.filePath; // assume backend returns { filePath: string }
+  }, []);
 
+  // Delimited files are already text; just upload original file as CSV
   const handleSaveDelimitedMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
-      return;
-    }
-
+    if (!apiService) { toast.error('❌ API service not available'); return; }
     try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
+      if (!isConnected && !(await testConnection())) {
+        toast.error('❌ No active PostgreSQL connection');
+        return;
       }
-
       const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
+      if (!connectionId) throw new Error('No PostgreSQL connection');
 
-      const tableName = generateForeignTableName(metadata, 'delimited');
-      const columns = extractColumnsFromMetadata(metadata, 'delimited');
-      const filePath = extractFilePath(metadata, 'delimited');
-      const options = extractOptions(metadata, 'delimited');
+      if (!metadata.file) { toast.error('❌ No file provided'); return; }
 
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in delimited file metadata.', { autoClose: 5000 });
-        return;
-      }
+      // Upload original file as CSV
+      const formData = new FormData();
+      formData.append('file', metadata.file);
+      const uploadRes = await fetch('http://localhost:3000/api/upload-csv', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadRes.ok) throw new Error('Upload failed');
+      const { filePath } = await uploadRes.json();
+
+      const columns = (metadata.schema || []).map((col: any) => ({
+        name: col.name,
+        type: col.type,
+        length: col.length,
+        nullable: true,
+      }));
+      if (columns.length === 0) { toast.error('❌ No columns defined'); return; }
+
+      const options = {
+        delimiter: metadata.delimiter || ',',
+        header: metadata.hasHeaders ? 'true' : 'false',
+        format: 'csv',
+      };
 
       const result = await apiService.createForeignTable(
         connectionId,
-        tableName,
+        metadata.name,
         columns,
         'delimited',
         filePath,
         options
       );
+      if (!result.success) throw new Error(result.error);
 
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
+      metadata.postgresTableName = result.tableName || metadata.name;
 
-      metadata.postgresTableName = result.tableName || tableName;
+      await apiService.insertDataSourceMetadata(connectionId, {
+        name: metadata.name,
+        type: 'delimited',
+        filePath,
+        foreignTableName: result.tableName || metadata.name,
+        options,
+      });
 
       window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'delimited',
-          folderId: 'file-delimited'
-        }
+        detail: { metadata, type: 'delimited', folderId: 'file-delimited' }
       }));
-
-      toast.success(`✅ Delimited file foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
+      toast.success(`✅ Delimited table "${metadata.name}" created`);
     } catch (error: any) {
-      console.error('❌ Failed to create delimited foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+      toast.error(`❌ ${error.message}`);
     }
   }, [apiService, isConnected, testConnection]);
 
-  const handleSavePositionalMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
+// Utility function to send errors to Consul (implement as needed)
+const reportErrorToConsul = (error: any) => {
+  // Example: send error message and context to Consul
+  // You might use fetch to POST to Consul's API or a custom endpoint
+  console.error('Reporting to Consul:', error); // Placeholder
+};
+
+// Modified function
+const handleSaveXMLMetadata = useCallback(async (metadata: any) => {
+  if (!apiService) {
+    reportErrorToConsul('❌ API service not available');
+    return;
+  }
+  try {
+    if (!isConnected && !(await testConnection())) {
+      reportErrorToConsul('❌ No active PostgreSQL connection');
+      return;
+    }
+    const connectionId = await getActivePostgresConnectionId(apiService);
+    if (!connectionId) throw new Error('No PostgreSQL connection');
+
+    if (!metadata.file) {
+      reportErrorToConsul('❌ No file provided');
       return;
     }
 
-    try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
+    // Convert XML to CSV via backend
+    const csvPath = await convertFileViaBackend(
+      metadata.file,
+      '/api/convert/xml',
+      {
+        rowXPath: metadata.rowXPath || '',
+        columns: JSON.stringify(metadata.schema || []),
       }
+    );
 
-      const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
-
-      const tableName = generateForeignTableName(metadata, 'positional');
-      const columns = extractColumnsFromMetadata(metadata, 'positional');
-      const filePath = extractFilePath(metadata, 'positional');
-      const options = extractOptions(metadata, 'positional');
-
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in positional file metadata.', { autoClose: 5000 });
-        return;
-      }
-
-      const result = await apiService.createForeignTable(
-        connectionId,
-        tableName,
-        columns,
-        'positional',
-        filePath,
-        options
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
-
-      metadata.postgresTableName = result.tableName || tableName;
-
-      window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'positional',
-          folderId: 'file-positional'
-        }
-      }));
-
-      toast.success(`✅ Positional file foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
-    } catch (error: any) {
-      console.error('❌ Failed to create positional foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+    const columns = (metadata.schema || []).map((col: any) => ({
+      name: col.name,
+      type: col.type,
+      nullable: true,
+    }));
+    if (columns.length === 0) {
+      reportErrorToConsul('❌ No columns defined');
+      return;
     }
-  }, [apiService, isConnected, testConnection]);
 
+    const options = { format: 'xml' };
+
+    const result = await apiService.createForeignTable(
+      connectionId,
+      metadata.name,
+      columns,
+      'xml',
+      csvPath,
+      options
+    );
+    if (!result.success) throw new Error(result.error);
+
+    metadata.postgresTableName = result.tableName || metadata.name;
+
+    await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: 'xml',
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options,
+    });
+
+    window.dispatchEvent(new CustomEvent('metadata-created', {
+      detail: { metadata, type: 'xml', folderId: 'file-xml' }
+    }));
+    toast.success(`✅ XML table "${metadata.name}" created`);
+  } catch (error: any) {
+    reportErrorToConsul(`❌ ${error.message}`);
+  }
+}, [apiService, isConnected, testConnection, convertFileViaBackend]);
+
+  // Positional: convert via backend
+ const handleSavePositionalMetadata = useCallback(async (metadata: any) => {
+  if (!apiService) {
+    reportErrorToConsul('❌ API service not available');
+    return;
+  }
+  try {
+    if (!isConnected && !(await testConnection())) {
+      reportErrorToConsul('❌ No active PostgreSQL connection');
+      return;
+    }
+    const connectionId = await getActivePostgresConnectionId(apiService);
+    if (!connectionId) throw new Error('No PostgreSQL connection');
+
+    if (!metadata.file) {
+      reportErrorToConsul('❌ No file provided');
+      return;
+    }
+
+    // Convert positional file to CSV
+    const csvPath = await convertFileViaBackend(
+      metadata.file,
+      '/api/convert/positional',
+      {
+        columns: JSON.stringify(metadata.schema || []), // ✅ fixed property
+      }
+    );
+
+    // Map columns for foreign table creation
+    const mapDataType = (type: string): string => {
+      const typeMap: Record<string, string> = {
+        'String': 'TEXT',
+        'Integer': 'INTEGER',
+        'Decimal': 'NUMERIC',
+        'Date': 'DATE',
+        'Boolean': 'BOOLEAN',
+      };
+      return typeMap[type] || 'TEXT';
+    };
+
+    const columns = (metadata.schema || []).map((col: any) => ({
+      name: col.name,
+      type: mapDataType(col.type),
+      length: col.length,
+      nullable: true,
+    }));
+
+    if (columns.length === 0) {
+      reportErrorToConsul('❌ No columns defined');
+      return;
+    }
+
+    const options = { format: 'fixed' };
+
+    const result = await apiService.createForeignTable(
+      connectionId,
+      metadata.name,
+      columns,
+      'positional',
+      csvPath,
+      options
+    );
+    if (!result.success) throw new Error(result.error);
+
+    metadata.postgresTableName = result.tableName || metadata.name;
+
+    await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: 'positional',
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('metadata-created', {
+        detail: { metadata, type: 'positional', folderId: 'file-positional' },
+      })
+    );
+    toast.success(`✅ Positional table "${metadata.name}" created`);
+  } catch (error: any) {
+    reportErrorToConsul(`❌ ${error.message}`);
+  }
+}, [apiService, isConnected, testConnection, convertFileViaBackend]);
+  // File Schema: likely a combination of schema file + data file. We'll assume metadata contains both.
   const handleSaveFileSchemaMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
-      return;
-    }
-
+    if (!apiService) { toast.error('❌ API service not available'); return; }
     try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
+      if (!isConnected && !(await testConnection())) {
+        toast.error('❌ No active PostgreSQL connection');
+        return;
       }
-
       const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
+      if (!connectionId) throw new Error('No PostgreSQL connection');
+
+      if (!metadata.schemaFile || !metadata.dataFile) {
+        toast.error('❌ Both schema and data files required');
         return;
       }
 
-      const tableName = generateForeignTableName(metadata, 'schema');
-      const columns = extractColumnsFromMetadata(metadata, 'schema');
-      const filePath = extractFilePath(metadata, 'schema');
-      const options = extractOptions(metadata, 'schema');
+      // Upload both files as multipart
+      const formData = new FormData();
+      formData.append('schemaFile', metadata.schemaFile);
+      formData.append('dataFile', metadata.dataFile);
+      formData.append('dataFormat', metadata.dataFormat || 'delimited');
+      if (metadata.delimiter) formData.append('delimiter', metadata.delimiter);
+      // etc.
 
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in file schema metadata.', { autoClose: 5000 });
-        return;
-      }
+      const response = await fetch('http://localhost:3000/api/convert/schema', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) throw new Error('Schema conversion failed');
+      const { filePath } = await response.json();
+
+      const columns = (metadata.columns || []).map((col: any) => ({
+        name: col.name,
+        type: col.type,
+        nullable: true,
+      }));
+      if (columns.length === 0) { toast.error('❌ No columns defined'); return; }
+
+      const options = { format: metadata.dataFormat || 'csv' };
 
       const result = await apiService.createForeignTable(
         connectionId,
-        tableName,
+        metadata.name,
         columns,
-        'schema',
+        'schema', // or appropriate type? The FDW might be 'fdw_schema'
         filePath,
         options
       );
+      if (!result.success) throw new Error(result.error);
 
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
+      metadata.postgresTableName = result.tableName || metadata.name;
 
-      metadata.postgresTableName = result.tableName || tableName;
+      await apiService.insertDataSourceMetadata(connectionId, {
+        name: metadata.name,
+        type: 'schema',
+        filePath,
+        foreignTableName: result.tableName || metadata.name,
+        options,
+      });
 
       window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'schema',
-          folderId: 'file-schema'
-        }
+        detail: { metadata, type: 'schema', folderId: 'file-schema' }
       }));
-
-      toast.success(`✅ File schema foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
+      toast.success(`✅ Schema table "${metadata.name}" created`);
     } catch (error: any) {
-      console.error('❌ Failed to create file schema foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+      toast.error(`❌ ${error.message}`);
     }
   }, [apiService, isConnected, testConnection]);
 
+  // JSON/Avro/Parquet
   const handleSaveJsonAvroParquetMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
+  if (!apiService) {
+    toast.error('❌ API service not available');
+    return;
+  }
+  try {
+    if (!isConnected && !(await testConnection())) {
+      toast.error('❌ No active PostgreSQL connection');
+      return;
+    }
+    const connectionId = await getActivePostgresConnectionId(apiService);
+    if (!connectionId) throw new Error('No PostgreSQL connection');
+
+    if (!metadata.file) {
+      toast.error('❌ No file provided');
       return;
     }
 
-    try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
-      }
+    const format = metadata.format || 'json'; // json/avro/parquet
+    // ✅ FIXED: arguments now (file, endpoint, additionalFormData)
+    const csvPath = await convertFileViaBackend(
+      metadata.file,
+      '/api/convert/structured',
+      { format }
+    );
 
-      const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
-
-      const tableName = generateForeignTableName(metadata, 'json-avro-parquet');
-      const columns = extractColumnsFromMetadata(metadata, 'json-avro-parquet');
-      const filePath = extractFilePath(metadata, 'json-avro-parquet');
-      const options = extractOptions(metadata, 'json-avro-parquet');
-
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in JSON/Avro/Parquet metadata.', { autoClose: 5000 });
-        return;
-      }
-
-      const result = await apiService.createForeignTable(
-        connectionId,
-        tableName,
-        columns,
-        'json-avro-parquet',
-        filePath,
-        options
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
-
-      metadata.postgresTableName = result.tableName || tableName;
-
-      window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'json-avro-parquet',
-          folderId: 'file-json-avro-parquet'
-        }
-      }));
-
-      toast.success(`✅ JSON/Avro/Parquet foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
-    } catch (error: any) {
-      console.error('❌ Failed to create JSON/Avro/Parquet foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+    const columns = (metadata.schema || []).map((col: any) => ({
+      name: col.name,
+      type: col.type,
+      nullable: true,
+    }));
+    if (columns.length === 0) {
+      toast.error('❌ No columns defined');
+      return;
     }
-  }, [apiService, isConnected, testConnection]);
 
+    const options = { format };
+
+    const result = await apiService.createForeignTable(
+      connectionId,
+      metadata.name,
+      columns,
+      'json-avro-parquet', // this maps to fdw_multiformat
+      csvPath,
+      options
+    );
+    if (!result.success) throw new Error(result.error);
+
+    metadata.postgresTableName = result.tableName || metadata.name;
+
+    await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: format,
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('metadata-created', {
+        detail: { metadata, type: format, folderId: 'file-json-avro-parquet' },
+      })
+    );
+    toast.success(`✅ ${format.toUpperCase()} table "${metadata.name}" created`);
+  } catch (error: any) {
+    toast.error(`❌ ${error.message}`);
+  }
+}, [apiService, isConnected, testConnection, convertFileViaBackend]);
+
+  // Regex
   const handleSaveRegexMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
+  if (!apiService) {
+    toast.error('❌ API service not available');
+    return;
+  }
+  try {
+    if (!isConnected && !(await testConnection())) {
+      toast.error('❌ No active PostgreSQL connection');
+      return;
+    }
+    const connectionId = await getActivePostgresConnectionId(apiService);
+    if (!connectionId) throw new Error('No PostgreSQL connection');
+
+    if (!metadata.file) {
+      toast.error('❌ No file provided');
       return;
     }
 
-    try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
+    // ✅ FIXED: arguments now (file, endpoint, additionalFormData)
+    const csvPath = await convertFileViaBackend(
+      metadata.file,
+      '/api/convert/regex',
+      {
+        pattern: metadata.pattern,
+        flags: metadata.flags || '',
+        columns: JSON.stringify(metadata.columns || []), // optional column names
       }
+    );
 
-      const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
-
-      const tableName = generateForeignTableName(metadata, 'regex');
-      const columns = extractColumnsFromMetadata(metadata, 'regex');
-      const filePath = extractFilePath(metadata, 'regex');
-      const options = extractOptions(metadata, 'regex');
-
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in regex metadata.', { autoClose: 5000 });
-        return;
-      }
-
-      const result = await apiService.createForeignTable(
-        connectionId,
-        tableName,
-        columns,
-        'regex',
-        filePath,
-        options
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
-
-      metadata.postgresTableName = result.tableName || tableName;
-
-      window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'regex',
-          folderId: 'file-regex'
-        }
-      }));
-
-      toast.success(`✅ Regex foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
-    } catch (error: any) {
-      console.error('❌ Failed to create regex foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+    const columns = (metadata.columns || []).map((col: any) => ({
+      name: col.name,
+      type: col.type || 'text',
+      nullable: true,
+    }));
+    if (columns.length === 0) {
+      toast.error('❌ No columns defined');
+      return;
     }
-  }, [apiService, isConnected, testConnection]);
 
+    const options = { pattern: metadata.pattern, flags: metadata.flags };
+
+    const result = await apiService.createForeignTable(
+      connectionId,
+      metadata.name,
+      columns,
+      'regex',
+      csvPath,
+      options
+    );
+    if (!result.success) throw new Error(result.error);
+
+    metadata.postgresTableName = result.tableName || metadata.name;
+
+    await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: 'regex',
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('metadata-created', {
+        detail: { metadata, type: 'regex', folderId: 'file-regex' },
+      })
+    );
+    toast.success(`✅ Regex table "${metadata.name}" created`);
+  } catch (error: any) {
+    toast.error(`❌ ${error.message}`);
+  }
+}, [apiService, isConnected, testConnection, convertFileViaBackend]);
+  // LDIF
   const handleSaveLDIFMetadata = useCallback(async (metadata: any) => {
-    if (!apiService) {
-      toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });
+  if (!apiService) {
+    reportErrorToConsul('❌ API service not available');
+    return;
+  }
+  try {
+    if (!isConnected && !(await testConnection())) {
+      toast.error('❌ No active PostgreSQL connection');
+      return;
+    }
+    const connectionId = await getActivePostgresConnectionId(apiService);
+    if (!connectionId) throw new Error('No PostgreSQL connection');
+
+    if (!metadata.file) {
+      toast.error('❌ No file provided');
       return;
     }
 
-    try {
-      if (!isConnected) {
-        const connected = await testConnection();
-        if (!connected) {
-          toast.error('❌ No active PostgreSQL connection. Please connect first.', { autoClose: 5000 });
-          return;
-        }
-      }
+    // ✅ FIXED: arguments now (file, endpoint, additionalFormData)
+    const csvPath = await convertFileViaBackend(
+      metadata.file,
+      '/api/convert/ldif',
+      {} // may pass additional parameters if needed
+    );
 
-      const connectionId = await getActivePostgresConnectionId(apiService);
-      if (!connectionId) {
-        toast.error('❌ No active PostgreSQL connection found.', { autoClose: 5000 });
-        return;
-      }
-
-      const tableName = generateForeignTableName(metadata, 'ldif');
-      const columns = extractColumnsFromMetadata(metadata, 'ldif');
-      const filePath = extractFilePath(metadata, 'ldif');
-      const options = extractOptions(metadata, 'ldif');
-
-      if (columns.length === 0) {
-        toast.error('❌ No columns defined in LDIF metadata.', { autoClose: 5000 });
-        return;
-      }
-
-      const result = await apiService.createForeignTable(
-        connectionId,
-        tableName,
-        columns,
-        'ldif',
-        filePath,
-        options
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Foreign table creation failed');
-      }
-
-      metadata.postgresTableName = result.tableName || tableName;
-
-      window.dispatchEvent(new CustomEvent('metadata-created', {
-        detail: {
-          metadata,
-          type: 'ldif',
-          folderId: 'file-ldif'
-        }
-      }));
-
-      toast.success(`✅ LDIF foreign table "${tableName}" created successfully!`, { autoClose: 5000 });
-    } catch (error: any) {
-      console.error('❌ Failed to create LDIF foreign table:', error);
-      toast.error(`❌ ${error.message || 'Could not create foreign table'}`, { autoClose: 5000 });
+    const columns = (metadata.columns || []).map((col: any) => ({
+      name: col.name,
+      type: col.type || 'text',
+      nullable: true,
+    }));
+    if (columns.length === 0) {
+      toast.error('❌ No columns defined');
+      return;
     }
-  }, [apiService, isConnected, testConnection]);
 
+    const options = {};
+
+    const result = await apiService.createForeignTable(
+      connectionId,
+      metadata.name,
+      columns,
+      'ldif',
+      csvPath,
+      options
+    );
+    if (!result.success) throw new Error(result.error);
+
+    metadata.postgresTableName = result.tableName || metadata.name;
+
+    await apiService.insertDataSourceMetadata(connectionId, {
+      name: metadata.name,
+      type: 'ldif',
+      filePath: csvPath,
+      foreignTableName: result.tableName || metadata.name,
+      options,
+    });
+
+    window.dispatchEvent(
+      new CustomEvent('metadata-created', {
+        detail: { metadata, type: 'ldif', folderId: 'file-ldif' },
+      })
+    );
+    toast.success(`✅ LDIF table "${metadata.name}" created`);
+  } catch (error: any) {
+    toast.error(`❌ ${error.message}`);
+  }
+}, [apiService, isConnected, testConnection, convertFileViaBackend]);
+  // Database (already existing, keep as is)
   const handleSaveDatabaseMetadata = useCallback(async (metadata: any) => {
     if (!apiService) {
       toast.error('❌ Database API service is not initialized.', { autoClose: 5000 });

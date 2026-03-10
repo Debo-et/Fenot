@@ -11,7 +11,8 @@ import {
   Table,
   AlertCircle,
   FileText,
-  Settings
+  Settings,
+  AlertTriangle
 } from 'lucide-react';
 import {
   DelimitedFileMetadataFormData,
@@ -44,9 +45,12 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
   const [parsingConfig, setParsingConfig] = useState({
     skipEmptyLines: true,
     transformHeader: true,
-    previewLines: 10
+    previewLines: 10,
+    maxTypeInferenceRows: 1000
   });
   const [parseResult, setParseResult] = useState<ParseResult<string[]> | null>(null);
+  const [showColumnWarning, setShowColumnWarning] = useState(false);
+  const [maxColumnsDetected, setMaxColumnsDetected] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const totalSteps = 5;
@@ -77,12 +81,165 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     'UTF-16'
   ];
 
-  // Parse delimited file using PapaParse with proper typing
+  // Data types for dropdown
+  const dataTypes = ['String', 'Integer', 'Decimal', 'Date', 'Boolean'];
+
+  // ------------------------------------------------------------
+  // Enhanced delimiter auto‑detection (samples multiple lines)
+  // ------------------------------------------------------------
+  const autoDetectDelimiter = (content: string, linesToSample = 10): string => {
+    const lines = content.split('\n')
+      .slice(0, linesToSample)
+      .filter(line => line.trim() !== '');
+
+    if (lines.length === 0) return ',';
+
+    const candidates = [
+      { delim: ',', regex: /,/g },
+      { delim: ';', regex: /;/g },
+      { delim: '\t', regex: /\t/g },
+      { delim: '|', regex: /\|/g },
+      { delim: ':', regex: /:/g },
+      { delim: ' ', regex: /\s/g }   // space is last resort
+    ];
+
+    const scores: Record<string, number> = {};
+    lines.forEach(line => {
+      candidates.forEach(({ delim, regex }) => {
+        const count = (line.match(regex) || []).length;
+        scores[delim] = (scores[delim] || 0) + count;
+      });
+    });
+
+    // Prefer non‑space delimiters if they have any count
+    const nonSpaceScores = Object.entries(scores).filter(([d]) => d !== ' ');
+    if (nonSpaceScores.length > 0) {
+      const best = nonSpaceScores.reduce((a, b) => (a[1] > b[1] ? a : b));
+      return best[0];
+    }
+    return ' '; // fallback to space
+  };
+
+  // ------------------------------------------------------------
+  // Make column names unique (PostgreSQL requires unique names)
+  // ------------------------------------------------------------
+  const makeUniqueNames = (names: string[]): string[] => {
+    const seen = new Map<string, number>();
+    return names.map(name => {
+      if (!seen.has(name)) {
+        seen.set(name, 0);
+        return name;
+      } else {
+        const count = seen.get(name)! + 1;
+        seen.set(name, count);
+        return `${name}_${count}`;
+      }
+    });
+  };
+
+  // ------------------------------------------------------------
+  // Infer data type from a set of sample values (voting)
+  // ------------------------------------------------------------
+  const inferDataTypeFromSamples = (samples: string[]): string => {
+    if (samples.length === 0) return 'String';
+
+    const typeCounts: Record<string, number> = {
+      Integer: 0, Decimal: 0, Date: 0, Boolean: 0, String: 0
+    };
+
+    samples.forEach(val => {
+      if (val === '') return;
+      // Integer (no decimal point)
+      if (/^-?\d+$/.test(val)) {
+        typeCounts.Integer++;
+      }
+      // Decimal (including negative and decimal point)
+      else if (/^-?\d+\.\d+$/.test(val)) {
+        typeCounts.Decimal++;
+      }
+      // Date (common formats)
+      else if (!isNaN(Date.parse(val)) || /^\d{4}-\d{2}-\d{2}/.test(val)) {
+        typeCounts.Date++;
+      }
+      // Boolean
+      else if (/^(true|false|yes|no|0|1)$/i.test(val)) {
+        typeCounts.Boolean++;
+      }
+      else {
+        typeCounts.String++;
+      }
+    });
+
+    // Return type with highest count
+    let bestType = 'String';
+    let bestCount = 0;
+    for (const [type, count] of Object.entries(typeCounts)) {
+      if (count > bestCount) {
+        bestCount = count;
+        bestType = type;
+      }
+    }
+    return bestType;
+  };
+
+  // ------------------------------------------------------------
+  // Infer default length based on type and data
+  // ------------------------------------------------------------
+  const inferDefaultLength = (dataType: string, samples: string[]): number | undefined => {
+    switch (dataType) {
+      case 'String':
+        const maxLength = samples.length > 0 ? 
+          Math.max(...samples.map(val => String(val).length)) : 255;
+        return Math.min(Math.max(maxLength, 10), 4000);
+      case 'Integer':
+        return 15;
+      case 'Decimal':
+        return 20;
+      default:
+        return undefined;
+    }
+  };
+
+  // ------------------------------------------------------------
+  // Generate schema from headers and data (with type inference)
+  // ------------------------------------------------------------
+  const generateSchemaFromData = (
+    headers: string[],
+    data: string[][],
+    hasHeaders: boolean,
+    maxInferRows = 1000
+  ): Array<{ name: string; type: string; length?: number; sampleValues: string[] }> => {
+    const startRow = hasHeaders && data.length > 1 ? 1 : 0;
+    const numCols = headers.length;
+
+    // Collect values for type inference (up to maxInferRows)
+    const columnValues: string[][] = Array.from({ length: numCols }, () => []);
+    const endRow = Math.min(data.length, startRow + maxInferRows);
+    for (let i = startRow; i < endRow; i++) {
+      const row = data[i] || [];
+      for (let j = 0; j < numCols; j++) {
+        const val = row[j]?.trim();
+        if (val && val !== '') columnValues[j].push(val);
+      }
+    }
+
+    return headers.map((name, idx) => {
+      const values = columnValues[idx];
+      const type = inferDataTypeFromSamples(values);
+      const sampleValues = values.slice(0, 5);
+      const length = inferDefaultLength(type, values);
+      return { name, type, length, sampleValues };
+    });
+  };
+
+  // ------------------------------------------------------------
+  // Parse delimited file using PapaParse
+  // ------------------------------------------------------------
   const parseWithPapaParse = (content: string, config: any): Promise<ParseResult<string[]>> => {
     return new Promise((resolve, reject) => {
       Papa.parse(content, {
         delimiter: config.delimiter,
-        header: false, // We'll handle headers manually to get raw data
+        header: false,
         quoteChar: config.textQualifier || '"',
         skipEmptyLines: config.skipEmptyLines ? 'greedy' : false,
         complete: (results: ParseResult<string[]>) => {
@@ -91,34 +248,14 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
         error: (error: any) => {
           reject(error);
         },
-        // For large files, we could use chunking, but for metadata we want the full structure
         chunkSize: 8192
       });
     });
   };
 
-  // Auto-detect delimiter
-  const autoDetectDelimiter = (content: string): string => {
-    const firstLine = content.split('\n')[0];
-    
-    // Count occurrences of common delimiters
-    const delimiterCounts = delimiters.map(delimiter => ({
-      delimiter: delimiter.value,
-      count: (firstLine.match(new RegExp(`[${delimiter.value === ' ' ? '\\s' : delimiter.value}]`, 'g')) || []).length
-    }));
-
-    // Find the delimiter with the highest count (excluding space if it's too common)
-    const bestDelimiter = delimiterCounts
-      .filter(d => d.delimiter !== ' ' || d.count > 0)
-      .reduce((best, current) => 
-        current.count > best.count ? current : best, 
-        { delimiter: ',', count: 0 }
-      );
-
-    return bestDelimiter.count > 0 ? bestDelimiter.delimiter : ',';
-  };
-
+  // ------------------------------------------------------------
   // Handle file selection and parsing
+  // ------------------------------------------------------------
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -147,7 +284,7 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
         if (fileExtension === '.tsv') {
           detectedDelimiter = '\t';
         } else {
-          detectedDelimiter = autoDetectDelimiter(content);
+          detectedDelimiter = autoDetectDelimiter(content, 10);
         }
 
         // Parse the file with PapaParse
@@ -159,15 +296,40 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
 
         setParseResult(result);
 
-        // Generate headers from the parsed data
-        const rawData = result.data;
-        const headers = formData.hasHeaders && rawData.length > 0 
-          ? rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`)
-          : rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+        // Determine raw data and max columns
+        const rawData = result.data as string[][];
+        const maxCols = rawData.reduce((max, row) => Math.max(max, row.length), 0);
+        setMaxColumnsDetected(maxCols);
 
-        // Generate schema
-        const schema = generateSchemaFromData(headers, rawData);
-        
+        // Generate headers (unique names)
+        let headers: string[] = [];
+        if (formData.hasHeaders && rawData.length > 0) {
+          headers = rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`);
+        } else {
+          headers = rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+        }
+
+        // Ensure we have at least maxCols headers
+        if (maxCols > headers.length) {
+          for (let i = headers.length; i < maxCols; i++) {
+            headers.push(`Column_${i + 1}`);
+          }
+          setShowColumnWarning(true);
+        } else {
+          setShowColumnWarning(false);
+        }
+
+        // Deduplicate header names
+        headers = makeUniqueNames(headers);
+
+        // Generate schema using enhanced type inference
+        const schema = generateSchemaFromData(
+          headers,
+          rawData,
+          formData.hasHeaders,
+          parsingConfig.maxTypeInferenceRows
+        );
+
         // Get sample data (first 10 rows, excluding header if needed)
         const sampleStartRow = formData.hasHeaders && rawData.length > 1 ? 1 : 0;
         const sampleData = rawData.slice(sampleStartRow, sampleStartRow + parsingConfig.previewLines);
@@ -195,102 +357,9 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     reader.readAsText(file, formData.encoding);
   };
 
-  // Generate schema from detected headers and data
-  const generateSchemaFromData = (headers: string[], data: string[][]): Array<{ 
-    name: string; 
-    type: string; 
-    length?: number;
-    sampleValues: string[];
-  }> => {
-    return headers.map((header, index) => {
-      // Analyze column data to infer type (skip header row if hasHeaders is true)
-      const startRow = formData.hasHeaders && data.length > 1 ? 1 : 0;
-      const columnData = data
-        .slice(startRow)
-        .map(row => row[index])
-        .filter(val => val !== '' && val != null && val !== undefined)
-        .map(val => val.toString().trim());
-
-      const inferredType = inferDataTypeFromSample(columnData);
-      const sampleValues = columnData.slice(0, 5); // Get first 5 sample values
-      
-      return {
-        name: header,
-        type: inferredType,
-        length: inferDefaultLength(inferredType, columnData),
-        sampleValues
-      };
-    });
-  };
-
-  // Infer data type from sample data
-  const inferDataTypeFromSample = (samples: string[]): string => {
-    if (samples.length === 0) return 'String';
-    
-    // Check for dates
-    const datePatterns = [
-      /^\d{4}-\d{2}-\d{2}$/, // YYYY-MM-DD
-      /^\d{2}\/\d{2}\/\d{4}$/, // MM/DD/YYYY
-      /^\d{2}-\d{2}-\d{4}$/, // MM-DD-YYYY
-      /^\d{4}\/\d{2}\/\d{2}$/ // YYYY/MM/DD
-    ];
-
-    const dateCount = samples.filter(val => {
-      // Try parsing as date
-      const date = new Date(val);
-      if (!isNaN(date.getTime())) return true;
-      
-      // Check against patterns
-      return datePatterns.some(pattern => pattern.test(val));
-    }).length;
-    
-    if (dateCount / samples.length > 0.7) return 'Date';
-    
-    // Check for numbers
-    const numberCount = samples.filter(val => {
-      if (val.trim() === '') return false;
-      const num = parseFloat(val.replace(/[,$%]/g, '')); // Remove common number formatting
-      return !isNaN(num) && isFinite(num);
-    }).length;
-    
-    if (numberCount / samples.length > 0.7) {
-      // Check if all numbers are integers
-      const integerCount = samples.filter(val => {
-        if (val.trim() === '') return false;
-        const num = parseFloat(val.replace(/[,$%]/g, ''));
-        return !isNaN(num) && isFinite(num) && Number.isInteger(num);
-      }).length;
-      
-      return integerCount / numberCount > 0.9 ? 'Integer' : 'Decimal';
-    }
-    
-    // Check for booleans
-    const booleanCount = samples.filter(val => 
-      ['true', 'false', 'yes', 'no', '1', '0', 'y', 'n', 't', 'f'].includes(val.toLowerCase().trim())
-    ).length;
-    
-    if (booleanCount / samples.length > 0.8) return 'Boolean';
-    
-    return 'String';
-  };
-
-  // Infer default length based on type and data
-  const inferDefaultLength = (dataType: string, samples: string[]): number | undefined => {
-    switch (dataType) {
-      case 'String':
-        const maxLength = samples.length > 0 ? 
-          Math.max(...samples.map(val => String(val).length)) : 255;
-        return Math.min(Math.max(maxLength, 10), 4000);
-      case 'Integer':
-        return 15;
-      case 'Decimal':
-        return 20;
-      default:
-        return undefined;
-    }
-  };
-
-  // Handle delimiter change
+  // ------------------------------------------------------------
+  // Handle delimiter change (reparse with new delimiter)
+  // ------------------------------------------------------------
   const handleDelimiterChange = async (newDelimiter: string) => {
     if (!fileContent) return;
 
@@ -304,12 +373,35 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
 
       setParseResult(result);
 
-      const rawData = result.data;
-      const headers = formData.hasHeaders && rawData.length > 0 
-        ? rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`)
-        : rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+      const rawData = result.data as string[][];
+      const maxCols = rawData.reduce((max, row) => Math.max(max, row.length), 0);
+      setMaxColumnsDetected(maxCols);
 
-      const schema = generateSchemaFromData(headers, rawData);
+      let headers: string[] = [];
+      if (formData.hasHeaders && rawData.length > 0) {
+        headers = rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`);
+      } else {
+        headers = rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+      }
+
+      if (maxCols > headers.length) {
+        for (let i = headers.length; i < maxCols; i++) {
+          headers.push(`Column_${i + 1}`);
+        }
+        setShowColumnWarning(true);
+      } else {
+        setShowColumnWarning(false);
+      }
+
+      headers = makeUniqueNames(headers);
+
+      const schema = generateSchemaFromData(
+        headers,
+        rawData,
+        formData.hasHeaders,
+        parsingConfig.maxTypeInferenceRows
+      );
+
       const sampleStartRow = formData.hasHeaders && rawData.length > 1 ? 1 : 0;
       const sampleData = rawData.slice(sampleStartRow, sampleStartRow + parsingConfig.previewLines);
 
@@ -326,17 +418,42 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     }
   };
 
-  // Handle headers option change
+  // ------------------------------------------------------------
+  // Handle headers option change (toggle)
+  // ------------------------------------------------------------
   const handleHasHeadersChange = async (hasHeaders: boolean) => {
     if (!fileContent || !parseResult) return;
 
     try {
-      const rawData = parseResult.data;
-      const headers = hasHeaders && rawData.length > 0 
-        ? rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`)
-        : rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+      const rawData = parseResult.data as string[][];
+      const maxCols = rawData.reduce((max, row) => Math.max(max, row.length), 0);
+      setMaxColumnsDetected(maxCols);
 
-      const schema = generateSchemaFromData(headers, rawData);
+      let headers: string[] = [];
+      if (hasHeaders && rawData.length > 0) {
+        headers = rawData[0].map((cell, index) => cell?.toString().trim() || `Column${index + 1}`);
+      } else {
+        headers = rawData[0]?.map((_, index) => `Column${index + 1}`) || [];
+      }
+
+      if (maxCols > headers.length) {
+        for (let i = headers.length; i < maxCols; i++) {
+          headers.push(`Column_${i + 1}`);
+        }
+        setShowColumnWarning(true);
+      } else {
+        setShowColumnWarning(false);
+      }
+
+      headers = makeUniqueNames(headers);
+
+      const schema = generateSchemaFromData(
+        headers,
+        rawData,
+        hasHeaders,
+        parsingConfig.maxTypeInferenceRows
+      );
+
       const sampleStartRow = hasHeaders && rawData.length > 1 ? 1 : 0;
       const sampleData = rawData.slice(sampleStartRow, sampleStartRow + parsingConfig.previewLines);
 
@@ -350,23 +467,32 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     }
   };
 
+  // ------------------------------------------------------------
   // Update form data
+  // ------------------------------------------------------------
   const updateFormData = (updates: Partial<DelimitedFileMetadataFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }));
   };
 
+  // ------------------------------------------------------------
   // Update schema field
+  // ------------------------------------------------------------
   const updateSchema = (index: number, field: string, value: string | number) => {
     const newSchema = [...formData.schema];
     newSchema[index] = { ...newSchema[index], [field]: value };
     updateFormData({ schema: newSchema });
   };
 
+  // ------------------------------------------------------------
   // Update parsing configuration
+  // ------------------------------------------------------------
   const updateParsingConfig = (updates: Partial<typeof parsingConfig>) => {
     setParsingConfig(prev => ({ ...prev, ...updates }));
   };
 
+  // ------------------------------------------------------------
+  // Navigation
+  // ------------------------------------------------------------
   const handleNext = () => {
     if (currentStep < totalSteps) {
       setCurrentStep(currentStep + 1);
@@ -380,6 +506,7 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
   };
 
   const handleSave = () => {
+    // Ensure we pass the unique column names to the save handler
     onSave(formData);
     handleClose();
   };
@@ -404,12 +531,13 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     setFileContent('');
     setParseResult(null);
     setError(null);
+    setShowColumnWarning(false);
+    setMaxColumnsDetected(0);
   };
 
-  // Data types for dropdown
-  const dataTypes = ['String', 'Integer', 'Decimal', 'Date', 'Boolean'];
-
+  // ------------------------------------------------------------
   // Render parsing statistics
+  // ------------------------------------------------------------
   const renderParsingStats = () => {
     if (!parseResult) return null;
 
@@ -431,6 +559,15 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
             </span>
           </div>
         </div>
+        {showColumnWarning && (
+          <div className="mt-2 flex items-center space-x-2 text-orange-700 dark:text-orange-300 text-xs">
+            <AlertTriangle className="h-4 w-4" />
+            <span>
+              Warning: Row lengths are inconsistent. Maximum detected columns: {maxColumnsDetected}. 
+              Extra columns have been added to the schema.
+            </span>
+          </div>
+        )}
         {parseResult.errors.length > 0 && (
           <div className="mt-2 text-xs text-orange-700 dark:text-orange-300">
             <strong>Note:</strong> {parseResult.errors.length} parsing errors detected. Some data may not be parsed correctly.
@@ -447,7 +584,9 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
     );
   };
 
+  // ------------------------------------------------------------
   // Render data preview table
+  // ------------------------------------------------------------
   const renderDataPreview = () => {
     if (!formData.sampleData || formData.sampleData.length === 0) {
       return (
@@ -680,6 +819,20 @@ const DelimitedFileMetadataWizard: React.FC<DelimitedFileMetadataWizardProps> = 
                           className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                           min="1"
                           max="50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          Type Inference Rows
+                        </label>
+                        <input
+                          type="number"
+                          value={parsingConfig.maxTypeInferenceRows}
+                          onChange={(e) => updateParsingConfig({ maxTypeInferenceRows: parseInt(e.target.value) || 1000 })}
+                          className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                          min="10"
+                          max="5000"
+                          step="10"
                         />
                       </div>
                       <div className="flex items-center space-x-2">

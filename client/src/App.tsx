@@ -431,6 +431,7 @@ const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ children })
 // Main App Content Component
 const AppContent: React.FC = () => {
   const [appReady, setAppReady] = useState(false);
+  const [schemaReady, setSchemaReady] = useState(false);
   const [currentJob, setCurrentJob] = useState<any | null>(null);
   const [showCanvas, setShowCanvas] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]);
@@ -477,44 +478,68 @@ const AppContent: React.FC = () => {
     }
   }, []);
 
-  // Initialize app on mount (only database check)
+  // Poll health endpoint until schema is ready
   useEffect(() => {
-    const initializeApp = async () => {
+    if (!databaseContext.isConnected) return;
+
+    let isMounted = true;
+    let retryCount = 0;
+    const maxRetries = 30; // 30 * 2s = 60s timeout
+    const pollInterval = 2000; // 2 seconds
+
+    const checkSchemaReady = async () => {
       try {
-        console.log('🚀 Initializing application...');
-        
-        // Check database connection
-        if (!databaseContext.isConnected) {
-          if (databaseContext.connectionError) {
-            // Connection already failed during initialization
-            console.error('❌ Database connection failed during initialization');
-            return;
-          }
-          
-          // Try to establish connection
-          const connected = await databaseContext.testConnection();
-          if (!connected) {
-            console.error('❌ Database connection failed, cannot proceed');
-            return;
+        const response = await fetch('http://localhost:3000/health');
+        const data = await response.json();
+        if (isMounted) {
+          if (data.postgres?.schemaReady === true) {
+            console.log('✅ Schema ready, application can start');
+            setSchemaReady(true);
+          } else if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`⏳ Waiting for schema to be ready (${retryCount}/${maxRetries})...`);
+            setTimeout(checkSchemaReady, pollInterval);
+          } else {
+            console.error('❌ Schema readiness timeout after', maxRetries * pollInterval / 1000, 'seconds');
+            // Optionally show an error UI here
           }
         }
-        
-        console.log('✅ Database connection verified');
-        
-        // Start with empty state (no persistence)
-        setJobs([]);
-        setJobDesigns({});
-        
-        console.log('✅ Application initialization complete');
-        setAppReady(true);
-        
       } catch (error) {
-        console.error('❌ Error initializing app:', error);
+        console.error('❌ Health check failed during schema readiness polling:', error);
+        if (isMounted && retryCount < maxRetries) {
+          retryCount++;
+          setTimeout(checkSchemaReady, pollInterval);
+        }
       }
     };
 
-    initializeApp();
-  }, [databaseContext]);
+    checkSchemaReady();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [databaseContext.isConnected]);
+
+  // Initialize app when both database connected and schema ready
+  useEffect(() => {
+    if (databaseContext.isConnected && schemaReady) {
+      console.log('🚀 Application fully ready');
+      setAppReady(true);
+    }
+  }, [databaseContext.isConnected, schemaReady]);
+
+  // Initialize app on mount (old logic now replaced by above)
+  // We keep the original initializeApp effect but it now only sets empty state after readiness
+  // Actually, we can remove the old initializeApp effect and rely on the new readiness flag.
+  // But we still need to set initial empty jobs and jobDesigns. We'll do that when appReady becomes true.
+
+  useEffect(() => {
+    if (appReady) {
+      // Start with empty state (no persistence)
+      setJobs([]);
+      setJobDesigns({});
+    }
+  }, [appReady]);
 
   // ==================== CANVAS STATE INITIALIZATION ====================
   useEffect(() => {
@@ -1090,7 +1115,8 @@ const AppContent: React.FC = () => {
   }
 
   if (!appReady) {
-    return <LoadingSpinner message="Initializing React Flow application..." />;
+    // Show loading spinner while waiting for schema readiness
+    return <LoadingSpinner message="Initializing database schema..." />;
   }
 
   return (

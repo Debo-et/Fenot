@@ -16,6 +16,7 @@
     "dev": "npm run dev:backend & npm run dev:client",
     "dev:backend": "cd backend && npm run dev",
     "dev:client": "cd client && npm start",
+    "dev:full": "node dev.js",
     "install:all": "npm install && cd client && npm install && cd ../backend && npm install",
     "clean": "npm run clean:backend && npm run clean:client",
     "clean:backend": "cd backend && npm run clean",

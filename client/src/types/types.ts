@@ -145,6 +145,7 @@ export interface XMLMetadata extends CommonMetadata {
 
 // XML Element metadata (for individual elements)
 export interface XMLElementMetadata extends CommonMetadata {
+  id?: string;   
   type: 'xml-element';
   elementType: string;
   path: string;

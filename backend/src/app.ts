@@ -1,5 +1,3 @@
-// backend/src/app.ts
-
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -24,22 +22,39 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/database', databaseRoutes);
 app.use('/api', uploadRoutes);                                   // <-- NEW: mounts /api/upload-csv
 
-// Health check with PostgreSQL status
+// Health check with PostgreSQL status and schema readiness
 app.get('/health', async (_req, res) => {
   try {
     const postgresStatus = localPostgres.getStatus();
     const isHealthy = postgresStatus.connected && await localPostgres.testConnection();
-    
+
+    // Check if core tables exist (e.g., canvases)
+    let schemaReady = false;
+    if (isHealthy) {
+      try {
+        const result = await localPostgres.query(`
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_name = 'canvases' 
+          AND table_schema = 'public'
+        `);
+        schemaReady = result.rowCount > 0;
+      } catch (err) {
+        console.warn('Schema readiness check failed:', err);
+        schemaReady = false;
+      }
+    }
+
     return res.json({ 
-      status: isHealthy ? 'OK' : 'DEGRADED',
+      status: isHealthy && schemaReady ? 'OK' : 'DEGRADED',
       timestamp: new Date().toISOString(),
       service: 'Database Metadata Inspector API',
       postgres: {
         ...postgresStatus,
-        healthy: isHealthy
+        healthy: isHealthy,
+        schemaReady
       },
       success: true,
-      message: 'Backend is running'
+      message: schemaReady ? 'Backend fully ready' : 'Backend starting up...'
     });
   } catch (error) {
     return res.status(503).json({ 
